@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QProgressBar
+from PySide6.QtWidgets import QApplication, QProgressBar, QScrollArea, QToolButton
 from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.services.progress_service import ProgressService
@@ -24,6 +24,16 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     ]
     assert window.local_refresh_timer.interval() == 5_000
     assert window.my_work.detail.title.text() == "업무"
+    detail_scrolls = [x for x in window.my_work.findChildren(QScrollArea) if x.widget() is window.my_work.detail]
+    assert len(detail_scrolls) == 1
+    assert detail_scrolls[0].minimumWidth() == 520
+    assert window.my_work.table.parentWidget().minimumWidth() >= 420
+    assert isinstance(window.my_work.detail.refresh_button, QToolButton)
+    assert window.my_work.detail.refresh_button.height() <= 28
+    assert window.my_work.detail.history.isVisible()
+    window.my_work.detail.history_toggle.setChecked(False)
+    assert not window.my_work.detail.history.isVisible()
+    window.my_work.detail.history_toggle.setChecked(True)
     window.my_work.detail.note.setPlainText("저장하지 않은 메모")
     window.refresh_current_tab(automatic=True)
     assert window.my_work.detail.note.toPlainText() == "저장하지 않은 메모"
