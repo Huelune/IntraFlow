@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from pathlib import Path
 class AppSettings:
     app_name: str = "IntraFlow"
     db_filename: str = "intraflow.db"
+    config_filename: str = "intraflow.local.toml"
 
     @property
     def data_dir(self) -> Path:
@@ -24,6 +26,34 @@ class AppSettings:
     @property
     def database_url(self) -> str:
         return f"sqlite:///{self.db_path.as_posix()}"
+
+    @property
+    def config_path(self) -> Path:
+        configured = os.getenv("INTRAFLOW_CONFIG_PATH")
+        return Path(configured) if configured else Path.cwd() / self.config_filename
+
+    def runtime_config(self) -> "RuntimeConfig":
+        values: dict[str, object] = {}
+        if self.config_path.exists():
+            with self.config_path.open("rb") as handle:
+                values = tomllib.load(handle)
+        return RuntimeConfig(
+            current_user_id=os.getenv("INTRAFLOW_CURRENT_USER_ID", str(values.get("current_user_id", ""))) or None,
+            current_device_id=os.getenv("INTRAFLOW_CURRENT_DEVICE_ID", str(values.get("current_device_id", ""))) or None,
+            nas_root_path=os.getenv("INTRAFLOW_NAS_ROOT_PATH", str(values.get("nas_root_path", ""))) or None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeConfig:
+    current_user_id: str | None
+    current_device_id: str | None
+    nas_root_path: str | None
+
+    def require_user_id(self) -> str:
+        if not self.current_user_id:
+            raise ValueError("current_user_id must be configured in intraflow.local.toml")
+        return self.current_user_id
 
 
 settings = AppSettings()

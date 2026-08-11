@@ -12,3 +12,11 @@ class PermissionDeniedError(IntraFlowError):
 
 class ValidationError(IntraFlowError):
     pass
+
+
+class SyncError(IntraFlowError):
+    pass
+
+
+class RevisionConflictError(SyncError):
+    pass

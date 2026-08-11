@@ -3,6 +3,78 @@
 ## Product rule
 
 IntraFlow is an offline-first desktop application for a small trusted internal team. It must continue to allow local work updates when the NAS is unavailable.
+## 기본 응답 스타일
+- 사실 기반으로 답변하고, 불확실한 내용은 명확히 구분한다.
+- 불필요한 미화나 과도한 공감 표현은 줄이고 사무적이고 정중한 문체를 유지한다.
+- 사용자의 의견에 논리적 문제가 있으면 이유와 함께 분명하게 지적한다.
+- 가능하면 설명만 하지 말고 실제 수정, 테스트, 커밋까지 이어서 진행한다.
+
+## 코드 및 구현 원칙
+- 가독성과 유지보수성을 최우선으로 둔다.
+- 불필요한 factory/helper/추상화는 늘리지 말고, 흐름이 더 직관적이면 명시적인 코드를 선호한다.
+- 기존 구조는 존중하되 복잡도를 줄일 수 있으면 분명한 근거와 함께 단순화한다.
+- 기본은 ASCII를 사용하고, 파일이 이미 한글을 쓰거나 한글이 더 적절한 경우에만 비ASCII를 추가한다.
+- 파일 검색은 `rg`, 파일 생성/수정은 `apply_patch`를 우선 사용한다.
+- 사용자가 만든 관련 없는 변경은 절대 되돌리지 않는다.
+
+## Git 및 커밋 규칙
+- 커밋 메시지는 반드시 Conventional Commits 형식을 따른다.
+- 모든 커밋 메시지는 한글로 작성한다.
+- 커밋 전에는 의도한 파일만 스테이징한다.
+- `push`, PR 생성, 브랜치 정리는 사용자가 요청했을 때 진행한다.
+- 로컬 보조 디렉터리 `.tools/`는 추적하지 않는다.
+- 새로운 기능은 가능하면 `main` 기준 새 브랜치에서 시작하고, 기능 구현이 끝나면 먼저 기능 PR을 올린다.
+- 기능 구현을 위한 국소적 정리는 같은 브랜치에서 허용하지만, 구조 개선 중심의 리팩토링은 기능 머지 후 별도 브랜치와 별도 PR로 분리한다.
+
+## 기능 작업 절차
+- 새로운 기능을 구현하기 전에 필요한 확인 사항, 결정 사항, 우려 사항을 먼저 정리해서 답변한다.
+- 구현 전에는 확인이 필요한 포인트와 선택지, 예상 리스크를 먼저 논의하고 방향을 맞춘 뒤 구현에 들어간다.
+- 기능 구현 후에는 관련 테스트를 새로 작성하거나 기존 테스트를 보강한다.
+- 테스트를 실제로 실행해 결과를 확인하고, 문제없다면 커밋까지 이어서 진행한다.
+
+## GitHub 작업 원칙
+- PR, 이슈, 코멘트, 리뷰 메타데이터 조회는 Codex GitHub 커넥터를 우선 사용한다.
+- 로컬 변경 스테이징, 커밋, 브랜치 푸시, 현재 체크아웃 기준 PR 생성 fallback은 `git` 또는 `gh`를 사용한다.
+- GitHub 인증이 끊긴 경우 설치 문제와 인증 문제를 구분해서 설명한다. `gh`가 설치되어 있어도 토큰이 invalid면 재인증이 필요하다고 명확히 말한다.
+- PR 본문은 변경 내용, 배경, 영향, 검증, 리스크, 후속 고려 사항까지 포함해 충분히 자세히 작성한다.
+## 테스트 및 검증
+- 변경 범위에 맞는 테스트를 직접 실행하고 결과를 함께 보고한다.
+- GUI 레이아웃이나 상태 로직을 바꿀 때는 관련 GUI 테스트를 최소한 한 번은 돌린다.
+- 업로드/매핑/lookup 로직을 바꿀 때는 기존 회귀 테스트가 깨지지 않는지 우선 확인한다.
+- GUI 레이아웃 수정 시 파일, 매핑, 검증, 업로드, 결과 페이지를 전체화면과 일반 창 크기 양쪽 기준으로 확인한다.
+
+## 문서화 원칙
+- 새 기능이나 작업 흐름이 추가되면 README 또는 관련 문서를 현재 동작 기준으로 갱신한다.
+- 사용자가 PR을 요청하면 PR 본문은 짧은 요약이 아니라 변경 배경, 영향, 검증, 리스크까지 충분히 적는다.
+
+
+## Notion 프로젝트 관리
+
+- Record IntraFlow work only in the dedicated IntraFlow project document and development-work history database.
+- Before creating or updating a Notion page, retrieve the actual database data source and current schema.
+- When one logical task is complete, create a development-work history record or update the record with the same task name and representative commit.
+- Record local-only work as `local only`, pushed work or an open PR as `remote branch`, and work merged to `main` as `main reflected`.
+- Do not change the project document's current feature baseline merely because a PR is opened; update it only after `main` changes user flows, architecture, settings, or verification results.
+- Use existing backlog or portfolio relations only when there is a clear corresponding entry; do not create relation records without an explicit user request.
+- If Notion access or schema inspection is unavailable, complete repository work normally and report that Notion history registration is pending.
+
+
+### 상위 개발 포트폴리오
+- 개발 포트폴리오: `https://app.notion.com/p/3b1f5e6cf897818d9b4be7a92ed11508`
+- 프로젝트 데이터베이스: `https://app.notion.com/p/23c44f4364684707837b03ebd3284d27`
+- 프로젝트 데이터 소스: `collection://01f3c0b6-6b82-4748-8fdf-f4e4cabbd25c`
+
+
+### 동기화 규칙
+- 이 저장소의 작업은 위 IntraFlow 프로젝트 문서와 전용 데이터베이스에만 기록한다.
+- Notion 페이지를 생성하거나 수정하기 전에 실제 데이터 소스와 현재 스키마를 다시 조회한다.
+- 하나의 논리적 작업이 완료되면 개발 작업 이력을 생성하거나 동일 작업명·대표 커밋의 기존 기록을 갱신한다.
+- 로컬 작업은 `로컬 전용`, push 또는 열린 PR은 `원격 브랜치`, 실제 `main` 병합 후에는 `main 반영`으로 기록한다.
+- PR 생성만으로 표준 프로젝트 문서의 현재 제공 기능을 변경하지 않는다.
+- `main`의 기능, 사용자 흐름, 구조, 설정 또는 검증 결과가 바뀌면 표준 프로젝트 문서의 현재 기준과 최근 기준일을 갱신한다.
+- 기존 제품 및 작업 허브는 과거 링크와 하위 데이터베이스 보존 용도로 유지한다.
+- 기존 백로그와 포트폴리오는 명확히 대응하는 관계 연결에 사용하며, 사용자 요청 없이 새 항목을 임의로 만들지 않는다.
+- Notion 연결이나 스키마 확인이 불가능하면 코드와 Git 작업은 정상적으로 완료하고 작업 이력 등록 보류를 최종 응답에 표시한다.
 
 ## Architecture rules
 
