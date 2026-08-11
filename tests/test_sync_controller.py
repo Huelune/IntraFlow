@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import time
+
 from PySide6.QtWidgets import QApplication
 
 from intraflow.config import AppSettings, RuntimeConfig
@@ -76,3 +78,23 @@ def test_sync_operations_are_serialized_and_preferences_are_saved(tmp_path, monk
     assert loaded.auto_pull_enabled is True
     assert loaded.auto_pull_interval_minutes == 30
     assert controller.auto_timer.interval() == 30 * 60_000
+
+
+def test_real_thread_pool_delivers_completion_to_ui_thread(tmp_path, monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setenv("INTRAFLOW_CONFIG_PATH", str(tmp_path / "local.toml"))
+    service = FakeSyncService()
+    controller = SyncController(
+        service, AppSettings(), RuntimeConfig("user", "device", "Z:/IntraFlow"),
+    )
+
+    assert controller.pull() is True
+    deadline = time.monotonic() + 2
+    while controller.busy and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert controller.busy is False
+    assert controller.last_success_at is not None
+    assert controller._active_signals is None
+    assert service.calls == ["pull"]

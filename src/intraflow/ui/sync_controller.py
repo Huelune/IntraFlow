@@ -51,6 +51,7 @@ class SyncController(QObject):
         self.thread_pool = thread_pool or QThreadPool.globalInstance()
         self.busy = False
         self.current_operation: str | None = None
+        self._active_signals: _JobSignals | None = None
         self.last_success_at: str | None = None
         self.last_error: str | None = None
         self.auto_timer = QTimer(self)
@@ -97,6 +98,10 @@ class SyncController(QObject):
         self.started.emit(name, automatic)
         self.status_changed.emit()
         job = _SyncJob(action)
+        # QThreadPool may auto-delete the QRunnable before its queued signals
+        # are delivered to the UI thread. Keep the signal owner alive until
+        # either completion callback runs.
+        self._active_signals = job.signals
         job.signals.succeeded.connect(lambda result: self._finish_success(name, automatic, result))
         job.signals.failed.connect(lambda error: self._finish_failure(name, automatic, error))
         self.thread_pool.start(job)
@@ -111,6 +116,7 @@ class SyncController(QObject):
 
     def _finish_success(self, name: str, automatic: bool, result: object) -> None:
         self.busy, self.current_operation = False, None
+        self._active_signals = None
         self.last_success_at = datetime.now().astimezone().isoformat(timespec="seconds")
         self.last_error = None
         self.succeeded.emit(name, automatic, result)
@@ -119,6 +125,7 @@ class SyncController(QObject):
 
     def _finish_failure(self, name: str, automatic: bool, error: str) -> None:
         self.busy, self.current_operation, self.last_error = False, None, error
+        self._active_signals = None
         self.failed.emit(name, automatic, error)
         self.status_changed.emit()
         self._schedule_next()
