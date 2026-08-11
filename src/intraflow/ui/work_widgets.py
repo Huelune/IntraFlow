@@ -3,14 +3,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from PySide6.QtCore import QDate, Qt
+from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout,
-    QLabel, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSplitter, QStyle,
-    QTableWidget, QTableWidgetItem, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QButtonGroup, QCalendarWidget, QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
+    QScrollArea, QSplitter, QStackedWidget, QStyle, QTableWidget, QTableWidgetItem,
+    QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from intraflow.services.errors import IntraFlowError
 from intraflow.services.progress_service import ProgressService
+from intraflow.services.team_view_service import (
+    TeamCalendarEntry, TeamProgressNode, TeamViewFilters, TeamViewService,
+)
 from intraflow.services.work_service import WorkItemView, WorkService
 from intraflow.ui.dialogs import WorkItemDialog
 
@@ -425,13 +430,57 @@ class MyWorkWidget(QWidget):
                     or (progress == "DONE" and item.completed_quantity < item.total_quantity))
 
 
+class AggregateDetailPanel(QWidget):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setProperty("card", True)
+        self.title = QLabel("프로젝트 또는 파트를 선택하세요")
+        self.title.setProperty("role", "title")
+        self.path = QLabel()
+        self.path.setProperty("role", "muted")
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.values = QLabel()
+        self.values.setWordWrap(True)
+        self.children = QTableWidget(0, 4)
+        self.children.setHorizontalHeaderLabels(["하위 항목", "진행률", "업무 수", "경고"])
+        self.children.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.children.horizontalHeader().setStretchLastSection(True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.addWidget(self.title)
+        layout.addWidget(self.path)
+        layout.addWidget(self.progress)
+        layout.addWidget(self.values)
+        layout.addWidget(_section("하위 진행 현황"))
+        layout.addWidget(self.children, stretch=1)
+
+    def load(self, node: TeamProgressNode, path: str) -> None:
+        self.title.setText(node.label)
+        self.path.setText(path)
+        self.progress.setValue(round((node.progress_ratio or 0) * 100))
+        self.progress.setFormat("업무 없음" if node.progress_ratio is None else "%p%")
+        self.values.setText(
+            f"상태  {node.status}    전체 {node.total_count}    완료 {node.completed_count}    "
+            f"진행 중 {node.in_progress_count}    미시작 {node.not_started_count}    "
+            f"경고 {node.warning_count}\n마지막 갱신  {node.last_updated or '-'}")
+        self.children.setRowCount(len(node.children))
+        for row, child in enumerate(node.children):
+            values = [child.label, "업무 없음" if child.progress_ratio is None else f"{child.progress_ratio:.0%}",
+                      str(child.total_count), str(child.warning_count)]
+            for column, value in enumerate(values):
+                self.children.setItem(row, column, QTableWidgetItem(value))
+
+
 class TeamWorkWidget(QWidget):
     def __init__(
-        self, work: WorkService, progress: ProgressService, open_my_work: Callable[[str], None],
+        self, work: WorkService, progress: ProgressService, team_view: TeamViewService,
+        open_my_work: Callable[[str], None],
     ) -> None:
         super().__init__()
-        self.work, self.progress, self.open_my_work = work, progress, open_my_work
+        self.work, self.progress, self.team_view, self.open_my_work = work, progress, team_view, open_my_work
         self.current_item_id: str | None = None
+        self._calendar_formatted_dates: set[QDate] = set()
         self.filter_user, self.filter_project, self.filter_part, self.filter_progress = (
             QComboBox(), QComboBox(), QComboBox(), QComboBox())
         self.include_inactive = QCheckBox("비활성 포함")
@@ -441,6 +490,50 @@ class TeamWorkWidget(QWidget):
         for widget in (self.filter_user, self.filter_project, self.filter_part, self.filter_progress):
             widget.currentIndexChanged.connect(self.refresh)
         self.include_inactive.toggled.connect(self.refresh)
+        self.view_group = QButtonGroup(self)
+        self.view_group.setExclusive(True)
+        self.view_buttons = []
+        for index, text in enumerate(("목록", "캘린더", "진행 현황")):
+            button = QPushButton(text)
+            button.setCheckable(True)
+            button.setProperty("view", True)
+            self.view_group.addButton(button, index)
+            self.view_buttons.append(button)
+        self.view_buttons[0].setChecked(True)
+        self.view_group.idClicked.connect(self._switch_view)
+        self.left_stack = QStackedWidget()
+        self.left_stack.setMinimumWidth(420)
+        self.left_stack.addWidget(self._build_list_page())
+        self.left_stack.addWidget(self._build_calendar_page())
+        self.left_stack.addWidget(self._build_overview_page())
+        self.detail = WorkDetailPanel(owner_mode=False)
+        self.detail.refresh_button.clicked.connect(self.refresh)
+        self.detail.open_my_button.clicked.connect(self._open_selected)
+        self.aggregate_detail = AggregateDetailPanel()
+        self.detail_stack = QStackedWidget()
+        self.detail_stack.addWidget(_detail_scroll(self.detail))
+        self.detail_stack.addWidget(_detail_scroll(self.aggregate_detail))
+        filters = QHBoxLayout()
+        for button in self.view_buttons:
+            filters.addWidget(button)
+        filters.addSpacing(8)
+        for widget in (self.filter_user, self.filter_project, self.filter_part,
+                       self.filter_progress, self.include_inactive):
+            filters.addWidget(widget)
+        filters.addStretch()
+        splitter = QSplitter()
+        splitter.addWidget(self.left_stack)
+        splitter.addWidget(self.detail_stack)
+        splitter.setSizes([620, 620])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setCollapsible(1, False)
+        layout = QVBoxLayout(self)
+        layout.addLayout(filters)
+        layout.addWidget(splitter)
+        self.refresh()
+
+    def _build_list_page(self) -> QWidget:
         self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(
             ["소유자", "프로젝트", "파트", "업무", "일정", "완료량", "목표량", "진행률", "최신 메모"])
@@ -448,35 +541,74 @@ class TeamWorkWidget(QWidget):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.itemSelectionChanged.connect(self._load_selection)
-        self.detail = WorkDetailPanel(owner_mode=False)
-        self.detail.refresh_button.clicked.connect(self.refresh)
-        self.detail.open_my_button.clicked.connect(self._open_selected)
-        filters = QHBoxLayout()
-        for widget in (self.filter_user, self.filter_project, self.filter_part,
-                       self.filter_progress, self.include_inactive):
-            filters.addWidget(widget)
-        list_card = QWidget()
-        list_card.setProperty("card", True)
-        list_card.setMinimumWidth(420)
-        list_layout = QVBoxLayout(list_card)
-        list_layout.setContentsMargins(12, 12, 12, 12)
-        list_layout.addLayout(filters)
-        list_layout.addWidget(self.table)
-        splitter = QSplitter()
-        splitter.addWidget(list_card)
-        splitter.addWidget(_detail_scroll(self.detail))
-        splitter.setSizes([620, 620])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        splitter.setCollapsible(1, False)
-        layout = QVBoxLayout(self)
-        layout.addWidget(splitter)
+        self.table.itemSelectionChanged.connect(self._load_list_selection)
+        page = QWidget()
+        page.setProperty("card", True)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.addWidget(self.table)
+        return page
+
+    def _build_calendar_page(self) -> QWidget:
+        self.calendar = QCalendarWidget()
+        self.calendar.setGridVisible(True)
+        self.calendar.selectionChanged.connect(self._refresh_agenda)
+        self.calendar.currentPageChanged.connect(lambda *_args: self._refresh_calendar())
+        self.show_planned = QCheckBox("계획 일정 표시")
+        self.show_planned.toggled.connect(lambda *_args: self._refresh_calendar())
+        self.agenda = QTableWidget(0, 6)
+        self.agenda.setHorizontalHeaderLabels(["구분", "소유자", "업무", "기간", "상태", "진행률"])
+        self.agenda.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.agenda.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.agenda.horizontalHeader().setStretchLastSection(True)
+        self.agenda.itemSelectionChanged.connect(self._load_agenda_selection)
+        page = QWidget()
+        page.setProperty("card", True)
+        layout = QVBoxLayout(page)
+        actions = QHBoxLayout()
+        actions.addWidget(self.show_planned)
+        actions.addStretch()
+        layout.addLayout(actions)
+        layout.addWidget(self.calendar, stretch=2)
+        layout.addWidget(_section("선택 날짜의 팀 업무"))
+        layout.addWidget(self.agenda, stretch=1)
+        return page
+
+    def _build_overview_page(self) -> QWidget:
+        self.summary_labels = [QLabel("0") for _ in range(4)]
+        cards = QHBoxLayout()
+        for title, value in zip(("활성 프로젝트", "활성 업무", "완료 업무", "일정·목표 경고"), self.summary_labels):
+            card = QWidget()
+            card.setProperty("card", True)
+            box = QVBoxLayout(card)
+            box.setContentsMargins(10, 8, 10, 8)
+            caption = _muted(title)
+            value.setProperty("role", "section")
+            box.addWidget(caption)
+            box.addWidget(value)
+            cards.addWidget(card)
+        self.overview_tree = QTreeWidget()
+        self.overview_tree.setHeaderLabels(
+            ["프로젝트 / 파트 / 업무", "진행률", "전체", "완료", "진행 중", "미시작", "경고", "상태", "마지막 갱신"])
+        self.overview_tree.setAlternatingRowColors(True)
+        self.overview_tree.itemSelectionChanged.connect(self._load_overview_selection)
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addLayout(cards)
+        layout.addWidget(self.overview_tree)
+        return page
+
+    def _switch_view(self, index: int) -> None:
+        self.left_stack.setCurrentIndex(index)
+        self.filter_progress.setVisible(index != 2)
+        if index == 2:
+            self.detail_stack.setCurrentIndex(1)
+        else:
+            self.detail_stack.setCurrentIndex(0)
         self.refresh()
 
     def refresh(self, _signal_value: object = None, *, automatic: bool = False) -> None:
         selected, scroll = self.current_item_id, self.table.verticalScrollBar().value()
-        had_selection = selected is not None
         all_rows = self.work.list_team_work_items(include_inactive=True)
         self._refresh_filters(all_rows)
         rows = [x for x in all_rows if self._matches_filters(x)]
@@ -492,30 +624,165 @@ class TeamWorkWidget(QWidget):
             _set_work_row(self.table, row_index, item, values, progress_column=7, id_column=3)
             if item.work_item_id == selected:
                 selected_row = row_index
-        if selected_row < 0 and rows and not had_selection:
+        if selected_row < 0 and rows and selected is None:
             selected_row = 0
         if selected_row >= 0:
             self.table.selectRow(selected_row)
-            selected = rows[selected_row].work_item_id
+            self.current_item_id = rows[selected_row].work_item_id
         self.table.blockSignals(False)
         self.table.verticalScrollBar().setValue(scroll)
-        self.current_item_id = selected if selected_row >= 0 else None
-        if self.current_item_id:
+        self._refresh_calendar()
+        self._refresh_overview()
+        if self.left_stack.currentIndex() != 2:
             self._load_detail()
-        else:
-            message = ("선택한 업무가 현재 필터에서 제외되었거나 삭제되었습니다."
-                       if had_selection else "표시할 팀 업무가 없습니다.")
-            self.detail.clear(message)
 
-    def _load_selection(self) -> None:
+    def _refresh_calendar(self) -> None:
+        first = QDate(self.calendar.yearShown(), self.calendar.monthShown(), 1)
+        last = first.addMonths(1).addDays(-1)
+        self.calendar_entries = self.team_view.list_calendar_entries(
+            first.toString("yyyy-MM-dd"), last.toString("yyyy-MM-dd"),
+            include_planned=self.show_planned.isChecked(), filters=self._service_filters())
+        self.calendar_entries = [x for x in self.calendar_entries if self._matches_progress(x.progress_state)]
+        empty = QTextCharFormat()
+        for value in self._calendar_formatted_dates:
+            self.calendar.setDateTextFormat(value, empty)
+        self._calendar_formatted_dates.clear()
+        by_date: dict[QDate, set[str]] = {}
+        for entry in self.calendar_entries:
+            day = QDate.fromString(entry.start_date, "yyyy-MM-dd")
+            end = QDate.fromString(entry.end_date, "yyyy-MM-dd")
+            while day.isValid() and day <= end:
+                by_date.setdefault(day, set()).add(entry.source)
+                day = day.addDays(1)
+        for day, sources in by_date.items():
+            fmt = QTextCharFormat()
+            color = (self.calendar.palette().color(self.calendar.foregroundRole())
+                     if sources == {"PLANNED"} else QColor("#00A98E"))
+            if sources == {"PLANNED"}:
+                fmt.setForeground(color)
+                fmt.setBackground(self.calendar.palette().color(self.calendar.backgroundRole()).lighter(115))
+            else:
+                fmt.setBackground(QColor("#00A98E"))
+                fmt.setForeground(QColor("#07110F"))
+            self.calendar.setDateTextFormat(day, fmt)
+            self._calendar_formatted_dates.add(day)
+        self._refresh_agenda()
+
+    def _refresh_agenda(self) -> None:
+        day = self.calendar.selectedDate().toString("yyyy-MM-dd")
+        rows = [x for x in getattr(self, "calendar_entries", []) if x.start_date <= day <= x.end_date]
+        selected = self.current_item_id
+        scroll = self.agenda.verticalScrollBar().value()
+        self.agenda.blockSignals(True)
+        self.agenda.setRowCount(len(rows))
+        selected_row = -1
+        source_labels = {"ACTUAL": "개인", "PLANNED": "계획", "BOTH": "일정"}
+        for row_index, entry in enumerate(rows):
+            values = [source_labels[entry.source], entry.owner_name, entry.path,
+                      f"{entry.start_date} ~ {entry.end_date}", _progress_text(entry.progress_state),
+                      f"{entry.progress_ratio:.0%}"]
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                if column == 2:
+                    cell.setData(Qt.ItemDataRole.UserRole, entry.work_item_id)
+                self.agenda.setItem(row_index, column, cell)
+            if entry.work_item_id == selected:
+                selected_row = row_index
+        if selected_row >= 0:
+            self.agenda.selectRow(selected_row)
+        self.agenda.blockSignals(False)
+        self.agenda.verticalScrollBar().setValue(scroll)
+
+    def _refresh_overview(self) -> None:
+        expanded = self._expanded_overview_ids()
+        selected_items = self.overview_tree.selectedItems()
+        selected_node = selected_items[0].data(0, Qt.ItemDataRole.UserRole) if selected_items else None
+        selected_key = (selected_node.node_type, selected_node.id) if selected_node else None
+        overview = self.team_view.get_progress_overview(self._service_filters())
+        for label, value in zip(self.summary_labels, (
+            overview.active_project_count, overview.active_work_count,
+            overview.completed_work_count, overview.warning_count,
+        )):
+            label.setText(str(value))
+        self.overview_tree.blockSignals(True)
+        self.overview_tree.clear()
+        self._overview_items: dict[tuple[str, str], QTreeWidgetItem] = {}
+        for project in overview.projects:
+            item = self._add_progress_node(None, project, project.label)
+            if not expanded or (project.node_type, project.id) in expanded:
+                item.setExpanded(True)
+        if selected_key in self._overview_items:
+            self.overview_tree.setCurrentItem(self._overview_items[selected_key])
+        elif self.overview_tree.topLevelItemCount():
+            self.overview_tree.setCurrentItem(self.overview_tree.topLevelItem(0))
+        self.overview_tree.blockSignals(False)
+        if self.overview_tree.currentItem() is not None:
+            self._load_overview_selection()
+
+    def _add_progress_node(
+        self, parent: QTreeWidgetItem | None, node: TeamProgressNode, path: str,
+    ) -> QTreeWidgetItem:
+        values = [node.label, "업무 없음" if node.progress_ratio is None else f"{node.progress_ratio:.0%}",
+                  str(node.total_count), str(node.completed_count), str(node.in_progress_count),
+                  str(node.not_started_count), str(node.warning_count), node.status, node.last_updated or "-"]
+        item = QTreeWidgetItem(values)
+        item.setData(0, Qt.ItemDataRole.UserRole, node)
+        item.setData(0, Qt.ItemDataRole.UserRole + 1, path)
+        if parent is None:
+            self.overview_tree.addTopLevelItem(item)
+        else:
+            parent.addChild(item)
+        self._overview_items[(node.node_type, node.id)] = item
+        if node.progress_ratio is not None:
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(round(node.progress_ratio * 100))
+            self.overview_tree.setItemWidget(item, 1, bar)
+        for child in node.children:
+            self._add_progress_node(item, child, f"{path} / {child.label}")
+        return item
+
+    def _expanded_overview_ids(self) -> set[tuple[str, str]]:
+        values: set[tuple[str, str]] = set()
+        pending = [self.overview_tree.topLevelItem(i) for i in range(self.overview_tree.topLevelItemCount())]
+        while pending:
+            item = pending.pop()
+            node = item.data(0, Qt.ItemDataRole.UserRole)
+            if node and item.isExpanded():
+                values.add((node.node_type, node.id))
+            pending.extend(item.child(i) for i in range(item.childCount()))
+        return values
+
+    def _load_list_selection(self) -> None:
         row = self.table.currentRow()
         cell = self.table.item(row, 3) if row >= 0 else None
         self.current_item_id = cell.data(Qt.ItemDataRole.UserRole) if cell else None
         self._load_detail()
 
+    def _load_agenda_selection(self) -> None:
+        row = self.agenda.currentRow()
+        cell = self.agenda.item(row, 2) if row >= 0 else None
+        self.current_item_id = cell.data(Qt.ItemDataRole.UserRole) if cell else None
+        self._load_detail()
+
+    def _load_overview_selection(self) -> None:
+        selected = self.overview_tree.selectedItems()
+        if not selected:
+            return
+        node: TeamProgressNode = selected[0].data(0, Qt.ItemDataRole.UserRole)
+        path = selected[0].data(0, Qt.ItemDataRole.UserRole + 1)
+        if node.node_type == "WORK":
+            self.current_item_id = node.id
+            self.detail_stack.setCurrentIndex(0)
+            self._load_detail()
+        else:
+            self.detail_stack.setCurrentIndex(1)
+            self.aggregate_detail.load(node, path)
+
     def _load_detail(self) -> None:
+        self.detail_stack.setCurrentIndex(0)
         if not self.current_item_id:
-            self.detail.clear()
+            self.detail.clear("업무를 선택하면 공개 진행 이력이 표시됩니다.")
             return
         try:
             item = self.work.get_team_work_item(self.current_item_id)
@@ -530,11 +797,23 @@ class TeamWorkWidget(QWidget):
             self.open_my_work(self.current_item_id)
 
     def _refresh_filters(self, rows) -> None:
-        values = ((self.filter_user, "전체 사용자", {(x.owner_user_id, x.owner_name) for x in rows}),
-                  (self.filter_project, "전체 프로젝트", {(x.project_id, x.project_name) for x in rows}),
-                  (self.filter_part, "전체 파트", {(x.part_id, x.part_name) for x in rows}))
-        for combo, label, choices in values:
-            _fill_filter(combo, label, sorted(choices, key=lambda x: x[1]), combo.currentData())
+        user_id, project_id, part_id = (
+            self.filter_user.currentData(), self.filter_project.currentData(), self.filter_part.currentData())
+        users = {(x.owner_user_id, x.owner_name) for x in rows}
+        _fill_filter(self.filter_user, "전체 사용자", sorted(users, key=lambda x: x[1]), user_id)
+        user_id = self.filter_user.currentData()
+        projects = {(x.project_id, x.project_name) for x in rows if not user_id or x.owner_user_id == user_id}
+        _fill_filter(self.filter_project, "전체 프로젝트", sorted(projects, key=lambda x: x[1]), project_id)
+        project_id = self.filter_project.currentData()
+        parts = {(x.part_id, x.part_name) for x in rows
+                 if (not user_id or x.owner_user_id == user_id)
+                 and (not project_id or x.project_id == project_id)}
+        _fill_filter(self.filter_part, "전체 파트", sorted(parts, key=lambda x: x[1]), part_id)
+
+    def _service_filters(self) -> TeamViewFilters:
+        return TeamViewFilters(
+            user_id=self.filter_user.currentData(), project_id=self.filter_project.currentData(),
+            part_id=self.filter_part.currentData(), include_inactive=self.include_inactive.isChecked())
 
     def _matches_filters(self, item: WorkItemView) -> bool:
         if self.filter_user.currentData() and item.owner_user_id != self.filter_user.currentData():
@@ -543,10 +822,12 @@ class TeamWorkWidget(QWidget):
             return False
         if self.filter_part.currentData() and item.part_id != self.filter_part.currentData():
             return False
-        progress = self.filter_progress.currentData()
-        return not ((progress == "NOT_STARTED" and item.completed_quantity != 0)
-                    or (progress == "IN_PROGRESS" and not 0 < item.completed_quantity < item.total_quantity)
-                    or (progress == "DONE" and item.completed_quantity < item.total_quantity))
+        return self._matches_progress(
+            "DONE" if item.total_quantity > 0 and item.completed_quantity >= item.total_quantity
+            else "IN_PROGRESS" if item.completed_quantity > 0 else "NOT_STARTED")
+
+    def _matches_progress(self, state: str) -> bool:
+        return self.filter_progress.currentData() in (None, "ALL", state)
 
 
 def _set_work_row(
@@ -599,6 +880,10 @@ def _section(text: str) -> QLabel:
     label = QLabel(text)
     label.setProperty("role", "section")
     return label
+
+
+def _progress_text(state: str) -> str:
+    return {"DONE": "완료", "IN_PROGRESS": "진행 중", "NOT_STARTED": "미시작"}.get(state, state)
 
 
 def _muted(text: str) -> QLabel:

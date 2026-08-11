@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QApplication, QProgressBar, QScrollArea, QToolButton
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -50,6 +51,23 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     assert window.my_work.table.cellWidget(0, 6).value() == 50
     assert window.team_work.table.rowCount() == 1
     assert window.team_work.detail.history.rowCount() == 1
+    window.team_work.view_buttons[1].click()
+    window.team_work.show_planned.setChecked(True)
+    window.team_work.calendar.setSelectedDate(QDate(2026, 8, 5))
+    window.team_work.refresh(automatic=True)
+    assert window.team_work.left_stack.currentIndex() == 1
+    assert window.team_work.agenda.rowCount() == 1
+    assert window.team_work.calendar.selectedDate() == QDate(2026, 8, 5)
+    window.team_work.agenda.selectRow(0)
+    assert window.team_work.detail.title.text() == "업무"
+    window.team_work.view_buttons[2].click()
+    assert window.team_work.left_stack.currentIndex() == 2
+    assert window.team_work.overview_tree.topLevelItemCount() == 1
+    project_node = window.team_work.overview_tree.topLevelItem(0)
+    assert isinstance(window.team_work.overview_tree.itemWidget(project_node, 1), QProgressBar)
+    window.team_work.overview_tree.setCurrentItem(project_node)
+    assert window.team_work.detail_stack.currentIndex() == 1
+    assert window.team_work.aggregate_detail.title.text() == "프로젝트"
     normal_width = window.my_work.table.width()
     window.resize(1440, 900)
     app.processEvents()

@@ -118,6 +118,8 @@ QPushButton:hover, QToolButton:hover {{ border-color: {t.accent}; background: {t
 QPushButton:disabled, QToolButton:disabled {{ color: {t.disabled_text}; background: {t.disabled_surface}; border-color: {t.border}; }}
 QPushButton[primary="true"] {{ background: {t.primary}; color: {t.primary_text}; border-color: {t.primary}; font-weight: 700; }}
 QPushButton[danger="true"], QToolButton[danger="true"] {{ color: {t.danger}; border-color: {t.danger}; background: {t.surface}; }}
+QPushButton[view="true"] {{ min-height: 28px; padding: 0 10px; }}
+QPushButton[view="true"]:checked {{ background: {t.selection}; color: {t.accent}; border-color: {t.accent}; font-weight: 700; }}
 QDialog QPushButton[primary="true"] {{ min-height: 36px; }}
 QToolButton {{ min-width: 28px; min-height: 28px; max-width: 28px; max-height: 28px;
     border-radius: 5px; border: 1px solid {t.input_border}; background: {t.surface}; color: {t.text}; }}

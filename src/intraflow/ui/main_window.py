@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QTabWidget, QVBo
 from intraflow.config import AppSettings, RuntimeConfig, settings as default_settings
 from intraflow.services.administration_service import AdministrationService
 from intraflow.services.progress_service import ProgressService
+from intraflow.services.team_view_service import TeamViewService
 from intraflow.services.work_service import WorkService
 from intraflow.sync.sync_service import SyncService
 from intraflow.ui.administration_widget import AdministrationWidget
@@ -32,7 +33,8 @@ class MainWindow(QMainWindow):
         self.sync_controller.succeeded.connect(lambda *_args: self.refresh_all())
         self.tabs = QTabWidget()
         self.my_work = MyWorkWidget(work, progress, self.refresh_all)
-        self.team_work = TeamWorkWidget(work, progress, self.open_my_work)
+        team_view = TeamViewService(work.session_factory, current_user_id=work.current_user_id)
+        self.team_work = TeamWorkWidget(work, progress, team_view, self.open_my_work)
         self.tabs.addTab(self.my_work, "내 업무")
         self.tabs.addTab(self.team_work, "팀 업무")
         self.administration_widget = None
