@@ -15,6 +15,7 @@ def test_setup_provisions_user_and_device(session_factory: sessionmaker[Session]
         device = session.get(Device, identity.device_id)
     assert user is not None
     assert user.user_code == "tester"
+    assert user.is_system_admin == 1
     assert device is not None
     assert device.user_id == identity.user_id
 

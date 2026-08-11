@@ -36,6 +36,21 @@ class NasClient:
             raise SyncError(f"NAS snapshot {path} must be a JSON object")
         return payload
 
+    def exists_json(self, *parts: str) -> bool:
+        return self.path_for(*parts).is_file()
+
+    def list_project_ids(self) -> list[str]:
+        directory = self.root_path / "projects"
+        if not directory.is_dir():
+            return []
+        return sorted(path.stem for path in directory.glob("*.json") if path.is_file())
+
+    def list_user_ids(self) -> list[str]:
+        directory = self.root_path / "users"
+        if not directory.is_dir():
+            return []
+        return sorted(path.name for path in directory.iterdir() if (path / "public.json").is_file())
+
     def write_json_atomic(self, payload: dict[str, Any], *parts: str) -> Path:
         path = self.path_for(*parts)
         temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")

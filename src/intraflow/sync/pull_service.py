@@ -13,6 +13,7 @@ from intraflow.models import (
     ProgressHistory,
     Project,
     ProjectEditor,
+    SyncOutbox,
     SyncState,
     Unit,
     User,
@@ -46,6 +47,8 @@ class PullService:
         if not isinstance(snapshot, UsersSnapshot):
             raise SyncError("users.json is not a USERS snapshot")
         with self.session_factory.begin() as session:
+            if session.query(SyncOutbox).filter_by(target_type="USERS", target_id="global").one_or_none():
+                raise SyncError("로컬 사용자 변경이 있어 Pull할 수 없습니다. 먼저 Push하거나 충돌을 해결하세요.")
             if not self._newer(session, "USERS", "global", snapshot.revision):
                 return False
             for data in snapshot.users:
@@ -63,6 +66,8 @@ class PullService:
         if not isinstance(snapshot, UnitsSnapshot):
             raise SyncError("units.json is not a UNITS snapshot")
         with self.session_factory.begin() as session:
+            if session.query(SyncOutbox).filter_by(target_type="UNITS", target_id="global").one_or_none():
+                raise SyncError("로컬 단위 변경이 있어 Pull할 수 없습니다. 먼저 Push하거나 충돌을 해결하세요.")
             if not self._newer(session, "UNITS", "global", snapshot.revision):
                 return False
             for data in snapshot.units:
@@ -80,6 +85,9 @@ class PullService:
         if not isinstance(snapshot, ProjectSnapshot) or snapshot.project.id != project_id:
             raise SyncError("project path does not match project snapshot")
         with self.session_factory.begin() as session:
+            dirty = session.query(SyncOutbox).filter_by(target_type="PROJECT", target_id=project_id).one_or_none()
+            if dirty is not None:
+                raise SyncError("로컬 프로젝트 변경이 있어 Pull할 수 없습니다. 먼저 Push하거나 충돌을 해결하세요.")
             if not self._newer(session, "PROJECT", project_id, snapshot.revision):
                 return False
             self._upsert_project(session, snapshot)

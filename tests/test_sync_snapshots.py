@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.database import create_session_factory, create_sqlite_engine
 from intraflow.models import AssignmentProgress, Base, CalendarEvent, PersonalNote, Project, SyncOutbox
 from intraflow.services.progress_service import ProgressService
+from intraflow.services.administration_service import AdministrationService
+from intraflow.services.errors import RevisionConflictError
+from intraflow.services.setup_service import SetupService
 from intraflow.sync.nas_client import NasClient
 from intraflow.sync.pull_service import PullService
 from intraflow.sync.push_service import PushService
@@ -112,3 +116,43 @@ def test_pull_applies_definition_then_read_only_user_progress(
         assert progress is not None
         assert progress.completed_quantity == 5
     destination_engine.dispose()
+
+
+def test_admin_definition_push_writes_users_units_and_project(
+    session_factory: sessionmaker[Session], tmp_path
+) -> None:
+    identity = SetupService(session_factory).provision("owner", "Owner", "OWNER-PC")
+    admin = AdministrationService(session_factory, current_user_id=identity.user_id)
+    unit_id = admin.create_unit("EA", "개")
+    project_id = admin.create_project("Project")
+    part_id = admin.create_part(project_id, "Part", 1.0)
+    admin.create_work_item(part_id, "Work", 1, unit_id, 1.0)
+    nas = NasClient(tmp_path / "nas")
+
+    completed = PushService(session_factory, nas).push_pending(current_user_id=identity.user_id)
+
+    assert completed == 3
+    assert nas.exists_json("users.json")
+    assert nas.exists_json("units.json")
+    assert nas.exists_json("projects", f"{project_id}.json")
+    with session_factory() as session:
+        assert list(session.scalars(select(SyncOutbox))) == []
+
+
+def test_project_push_rejects_remote_revision_conflict(
+    session_factory: sessionmaker[Session], tmp_path
+) -> None:
+    identity = SetupService(session_factory).provision("owner", "Owner", "OWNER-PC")
+    admin = AdministrationService(session_factory, current_user_id=identity.user_id)
+    project_id = admin.create_project("Project")
+    nas = NasClient(tmp_path / "nas")
+    push = PushService(session_factory, nas)
+    push.push_pending(current_user_id=identity.user_id)
+    remote = nas.read_json("projects", f"{project_id}.json")
+    assert remote is not None
+    remote["revision"] += 1
+    remote["project"]["revision"] = remote["revision"]
+    nas.write_json_atomic(remote, "projects", f"{project_id}.json")
+
+    with pytest.raises(RevisionConflictError):
+        push.push_project(project_id)

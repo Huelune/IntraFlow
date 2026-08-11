@@ -76,8 +76,9 @@ class SnapshotBuilder:
 
     def units(self) -> UnitsSnapshot:
         units = list(self.session.scalars(select(Unit).order_by(Unit.sort_order, Unit.code)))
+        revision_value = self.session.get(AppMeta, "units_revision")
         return UnitsSnapshot(
-            revision=0,
+            revision=int(revision_value.value or 0) if revision_value else 0,
             generated_at=utc_now_iso(),
             units=[
                 UnitData(
