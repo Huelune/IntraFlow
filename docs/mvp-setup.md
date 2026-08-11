@@ -9,9 +9,9 @@
 
 ## Configure the workstation
 
-Copy `intraflow.local.toml.example` to `intraflow.local.toml`. An administrator must provision UUIDv4 values for `current_user_id` and `current_device_id`.
+The first app launch opens a setup dialog. Enter the user code, display name, optional PC name, and the already-mounted NAS path. IntraFlow creates the UUIDv4 user/device records and writes `intraflow.local.toml` automatically.
 
-Set `nas_root_path` to the already-mounted network drive or UNC path used for snapshot sharing. Do not place the local SQLite database on that path.
+For manual provisioning, copy `intraflow.local.toml.example` and set the IDs to records that already exist in the local database. Do not place the local SQLite database on the NAS path.
 
 ## Run
 

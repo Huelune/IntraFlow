@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,16 @@ class AppSettings:
             current_device_id=os.getenv("INTRAFLOW_CURRENT_DEVICE_ID", str(values.get("current_device_id", ""))) or None,
             nas_root_path=os.getenv("INTRAFLOW_NAS_ROOT_PATH", str(values.get("nas_root_path", ""))) or None,
         )
+
+    def save_runtime_config(self, runtime: "RuntimeConfig") -> None:
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        content = "\n".join([
+            f"current_user_id = {json.dumps(runtime.current_user_id or '')}",
+            f"current_device_id = {json.dumps(runtime.current_device_id or '')}",
+            f"nas_root_path = {json.dumps(runtime.nas_root_path or '')}",
+            "",
+        ])
+        self.config_path.write_text(content, encoding="utf-8", newline="\n")
 
 
 @dataclass(frozen=True, slots=True)
