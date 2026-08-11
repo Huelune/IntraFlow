@@ -38,8 +38,24 @@ def test_progress_rejects_over_target_and_other_user(session_factory: sessionmak
         service.add_delta(item.assignment_id, 11)
     other_id = admin.create_user("other", "Other")
     other = ProgressService(session_factory, current_user_id=other_id, current_device_id=None)
+    assert len(other.list_public_history(item.assignment_id)) == 0
     with pytest.raises(PermissionDeniedError):
         other.add_delta(item.assignment_id, 1)
+
+
+def test_other_active_user_can_read_public_history_only(session_factory: sessionmaker[Session]) -> None:
+    identity, admin, _work, _project, _part, item = build_workflow(session_factory)
+    owner = ProgressService(session_factory, current_user_id=identity.user_id, current_device_id=identity.device_id)
+    owner.add_delta(item.assignment_id, 2, "공개 메모")
+    other_id = admin.create_user("viewer", "Viewer")
+    viewer = ProgressService(session_factory, current_user_id=other_id, current_device_id=None)
+
+    history = viewer.list_public_history(item.assignment_id)
+
+    assert len(history) == 1
+    assert history[0].note == "공개 메모"
+    with pytest.raises(PermissionDeniedError):
+        viewer.set_note(item.assignment_id, "변조")
 
 
 def test_inactive_parent_blocks_progress(session_factory: sessionmaker[Session]) -> None:

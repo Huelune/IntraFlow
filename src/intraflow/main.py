@@ -17,10 +17,12 @@ from intraflow.sync.nas_client import NasClient
 from intraflow.sync.sync_service import SyncService
 from intraflow.ui.main_window import MainWindow
 from intraflow.ui.setup_dialog import SetupDialog
+from intraflow.ui.theme import apply_theme
 
 
 def main() -> int:
     app = QApplication(sys.argv)
+    apply_theme(app)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     project_root = Path(__file__).resolve().parents[2]
     try:
@@ -57,7 +59,9 @@ def main() -> int:
         sync_service = SyncService(
             session_factory, NasClient(runtime.nas_root_path), current_user_id=runtime.current_user_id,
         )
-    window = MainWindow(work, progress, administration, sync_service)
+    window = MainWindow(
+        work, progress, administration, sync_service, app_settings=settings, runtime=runtime,
+    )
     window.show()
     return app.exec()
 

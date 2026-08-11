@@ -24,9 +24,26 @@ def test_runtime_config_can_be_saved_and_loaded(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "intraflow.local.toml"
     monkeypatch.setenv("INTRAFLOW_CONFIG_PATH", str(config_path))
     settings = AppSettings()
-    settings.save_runtime_config(RuntimeConfig("user", "device", "Z:/IntraFlow"))
+    settings.save_runtime_config(RuntimeConfig(
+        "user", "device", "Z:/IntraFlow", auto_pull_enabled=True,
+        auto_pull_interval_minutes=30,
+    ))
 
     loaded = settings.runtime_config()
     assert loaded.current_user_id == "user"
     assert loaded.current_device_id == "device"
     assert loaded.nas_root_path == "Z:/IntraFlow"
+    assert loaded.auto_pull_enabled is True
+    assert loaded.auto_pull_interval_minutes == 30
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_runtime_config_uses_safe_auto_pull_defaults(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "intraflow.local.toml"
+    config_path.write_text('auto_pull_enabled = false\nauto_pull_interval_minutes = 3\n', encoding="utf-8")
+    monkeypatch.setenv("INTRAFLOW_CONFIG_PATH", str(config_path))
+
+    loaded = AppSettings().runtime_config()
+
+    assert loaded.auto_pull_enabled is False
+    assert loaded.auto_pull_interval_minutes == 5

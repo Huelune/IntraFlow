@@ -31,11 +31,18 @@ class AdministrationService:
             )) or 0
             return bool(user.is_system_admin), bool(editor)
 
+    def can_manage_project(self, project_id: str) -> bool:
+        with self.session_factory() as session:
+            user = self._current_user(session)
+            return bool(user.is_system_admin or session.get(ProjectEditor, (project_id, user.id)) is not None)
+
     def list_users(self) -> list[User]:
         with self.session_factory() as session:
             return list(session.scalars(select(User).order_by(User.user_code)))
 
-    def create_user(self, user_code: str, display_name: str, *, is_system_admin: bool = False) -> str:
+    def create_user(
+        self, user_code: str, display_name: str, *, is_system_admin: bool = False, is_active: bool = True,
+    ) -> str:
         user_code, display_name = user_code.strip(), display_name.strip()
         if not user_code or not display_name:
             raise ValidationError("사용자 코드와 표시 이름은 필수입니다.")
@@ -44,12 +51,41 @@ class AdministrationService:
             with self.session_factory.begin() as session:
                 self._require_admin(session)
                 session.add(User(id=user_id, user_code=user_code, display_name=display_name,
-                                 is_system_admin=int(is_system_admin), is_active=1,
+                                 is_system_admin=int(is_system_admin), is_active=int(is_active),
                                  created_at=now, updated_at=now, revision=1))
                 self._mark_dirty(session, "USERS", "global")
         except IntegrityError as exc:
             raise ValidationError("이미 사용 중인 사용자 코드입니다.") from exc
         return user_id
+
+    def update_user(
+        self, user_id: str, user_code: str, display_name: str, *,
+        is_system_admin: bool, is_active: bool,
+    ) -> None:
+        user_code, display_name = user_code.strip(), display_name.strip()
+        if not user_code or not display_name:
+            raise ValidationError("사용자 코드와 표시 이름은 필수입니다.")
+        try:
+            with self.session_factory.begin() as session:
+                self._require_admin(session)
+                user = session.get(User, user_id)
+                if user is None:
+                    raise NotFoundError("사용자를 찾을 수 없습니다.")
+                if user.id == self.current_user_id and not is_active:
+                    raise ValidationError("현재 사용자는 비활성화할 수 없습니다.")
+                if user.is_system_admin and user.is_active and (not is_system_admin or not is_active):
+                    active_admins = session.scalar(select(func.count()).select_from(User).where(
+                        User.is_system_admin == 1, User.is_active == 1,
+                    )) or 0
+                    if active_admins <= 1:
+                        raise ValidationError("마지막 활성 시스템 관리자의 권한을 해제할 수 없습니다.")
+                user.user_code, user.display_name = user_code, display_name
+                user.is_system_admin, user.is_active = int(is_system_admin), int(is_active)
+                user.revision += 1
+                user.updated_at = utc_now_iso()
+                self._mark_dirty(session, "USERS", "global")
+        except IntegrityError as exc:
+            raise ValidationError("이미 사용 중인 사용자 코드입니다.") from exc
 
     def set_user_active(self, user_id: str, active: bool) -> None:
         with self.session_factory.begin() as session:
@@ -62,7 +98,7 @@ class AdministrationService:
             user.is_active, user.revision, user.updated_at = int(active), user.revision + 1, utc_now_iso()
             self._mark_dirty(session, "USERS", "global")
 
-    def create_device(self, user_id: str, device_name: str) -> str:
+    def create_device(self, user_id: str, device_name: str, *, is_current: bool = False) -> str:
         if not device_name.strip():
             raise ValidationError("기기 이름은 필수입니다.")
         device_id = str(uuid4())
@@ -70,15 +106,42 @@ class AdministrationService:
             self._require_admin(session)
             if session.get(User, user_id) is None:
                 raise NotFoundError("사용자를 찾을 수 없습니다.")
+            if is_current:
+                for sibling in session.scalars(select(Device).where(Device.user_id == user_id)):
+                    sibling.is_current = 0
             session.add(Device(id=device_id, user_id=user_id, device_name=device_name.strip(),
-                               is_current=0, created_at=utc_now_iso()))
+                               is_current=int(is_current), created_at=utc_now_iso()))
         return device_id
+
+    def list_devices(self, user_id: str | None = None) -> list[Device]:
+        statement = select(Device)
+        if user_id:
+            statement = statement.where(Device.user_id == user_id)
+        with self.session_factory() as session:
+            return list(session.scalars(statement.order_by(Device.user_id, Device.device_name)))
+
+    def update_device(self, device_id: str, device_name: str, *, is_current: bool) -> None:
+        if not device_name.strip():
+            raise ValidationError("기기 이름은 필수입니다.")
+        with self.session_factory.begin() as session:
+            self._require_admin(session)
+            device = session.get(Device, device_id)
+            if device is None:
+                raise NotFoundError("기기를 찾을 수 없습니다.")
+            if is_current:
+                for sibling in session.scalars(select(Device).where(Device.user_id == device.user_id)):
+                    sibling.is_current = int(sibling.id == device.id)
+            else:
+                device.is_current = 0
+            device.device_name = device_name.strip()
 
     def list_units(self) -> list[Unit]:
         with self.session_factory() as session:
             return list(session.scalars(select(Unit).order_by(Unit.sort_order, Unit.code)))
 
-    def create_unit(self, code: str, display_name: str, *, sort_order: int = 0) -> str:
+    def create_unit(
+        self, code: str, display_name: str, *, sort_order: int = 0, is_active: bool = True,
+    ) -> str:
         code, display_name = code.strip(), display_name.strip()
         if not code or not display_name:
             raise ValidationError("단위 코드와 표시 이름은 필수입니다.")
@@ -87,12 +150,31 @@ class AdministrationService:
             with self.session_factory.begin() as session:
                 self._require_admin(session)
                 session.add(Unit(id=unit_id, code=code, display_name=display_name,
-                                 is_active=1, sort_order=sort_order))
+                                 is_active=int(is_active), sort_order=sort_order))
                 self._increment_meta(session, "units_revision")
                 self._mark_dirty(session, "UNITS", "global")
         except IntegrityError as exc:
             raise ValidationError("이미 사용 중인 단위 코드입니다.") from exc
         return unit_id
+
+    def update_unit(
+        self, unit_id: str, code: str, display_name: str, *, sort_order: int, is_active: bool,
+    ) -> None:
+        code, display_name = code.strip(), display_name.strip()
+        if not code or not display_name:
+            raise ValidationError("단위 코드와 표시 이름은 필수입니다.")
+        try:
+            with self.session_factory.begin() as session:
+                self._require_admin(session)
+                unit = session.get(Unit, unit_id)
+                if unit is None:
+                    raise NotFoundError("단위를 찾을 수 없습니다.")
+                unit.code, unit.display_name, unit.sort_order = code, display_name, sort_order
+                unit.is_active = int(is_active)
+                self._increment_meta(session, "units_revision")
+                self._mark_dirty(session, "UNITS", "global")
+        except IntegrityError as exc:
+            raise ValidationError("이미 사용 중인 단위 코드입니다.") from exc
 
     def set_unit_active(self, unit_id: str, active: bool) -> None:
         with self.session_factory.begin() as session:
@@ -109,20 +191,28 @@ class AdministrationService:
             return list(session.scalars(select(Project).where(Project.is_deleted == 0).order_by(Project.name)))
 
     def create_project(self, name: str, planned_start: str | None = None, planned_end: str | None = None,
-                       description: str | None = None) -> str:
+                       description: str | None = None, *, is_active: bool = True,
+                       editor_user_id: str | None = None) -> str:
         self._validate_period(name, planned_start, planned_end, "프로젝트")
         project_id, now = str(uuid4()), utc_now_iso()
         with self.session_factory.begin() as session:
             self._require_admin(session)
             session.add(Project(id=project_id, name=name.strip(), description=(description or "").strip() or None,
-                                planned_start=planned_start, planned_end=planned_end, status="ACTIVE", revision=1,
+                                planned_start=planned_start, planned_end=planned_end,
+                                status="ACTIVE" if is_active else "INACTIVE", revision=1,
                                 is_deleted=0, created_at=now, updated_at=now, updated_by=self.current_user_id))
             session.add(ProjectEditor(project_id=project_id, user_id=self.current_user_id))
+            if editor_user_id and editor_user_id != self.current_user_id:
+                editor = session.get(User, editor_user_id)
+                if editor is None or not editor.is_active:
+                    raise ValidationError("활성 사용자만 프로젝트 편집자로 지정할 수 있습니다.")
+                session.add(ProjectEditor(project_id=project_id, user_id=editor_user_id))
             self._mark_dirty(session, "PROJECT", project_id)
         return project_id
 
     def update_project(self, project_id: str, name: str, planned_start: str | None, planned_end: str | None,
-                       description: str | None = None, *, allow_child_conflicts: bool = False) -> None:
+                       description: str | None = None, *, allow_child_conflicts: bool = False,
+                       is_active: bool | None = None, editor_user_id: str | None = None) -> None:
         self._validate_period(name, planned_start, planned_end, "프로젝트")
         with self.session_factory.begin() as session:
             self._require_project_manager(session, project_id)
@@ -140,6 +230,13 @@ class AdministrationService:
                 raise ValidationError("새 기간을 벗어나는 파트가 있습니다:\n" + "\n".join(details))
             project.name, project.description = name.strip(), (description or "").strip() or None
             project.planned_start, project.planned_end = planned_start, planned_end
+            if is_active is not None:
+                project.status = "ACTIVE" if is_active else "INACTIVE"
+            if editor_user_id and session.get(ProjectEditor, (project_id, editor_user_id)) is None:
+                editor = session.get(User, editor_user_id)
+                if editor is None or not editor.is_active:
+                    raise ValidationError("활성 사용자만 프로젝트 편집자로 지정할 수 있습니다.")
+                session.add(ProjectEditor(project_id=project_id, user_id=editor_user_id))
             self._touch_project(session, project_id)
 
     def set_project_active(self, project_id: str, active: bool) -> None:
@@ -171,7 +268,7 @@ class AdministrationService:
             return list(session.scalars(statement.order_by(Part.project_id, Part.sort_order, Part.name)))
 
     def create_part(self, project_id: str, name: str, weight: float, planned_start: str | None = None,
-                    planned_end: str | None = None) -> str:
+                    planned_end: str | None = None, *, is_active: bool = True) -> str:
         self._validate_period(name, planned_start, planned_end, "파트")
         self._validate_weight(weight)
         part_id, now = str(uuid4()), utc_now_iso()
@@ -183,12 +280,13 @@ class AdministrationService:
             self._validate_within(planned_start, planned_end, project.planned_start, project.planned_end, "파트")
             session.add(Part(id=part_id, project_id=project_id, name=name.strip(), weight=weight,
                              planned_start=planned_start, planned_end=planned_end, sort_order=0,
-                             is_active=1, is_deleted=0, created_at=now, updated_at=now))
+                             is_active=int(is_active), is_deleted=0, created_at=now, updated_at=now))
             self._touch_project(session, project_id)
         return part_id
 
     def update_part(self, part_id: str, name: str, weight: float, planned_start: str | None,
-                    planned_end: str | None, *, allow_child_conflicts: bool = False) -> None:
+                    planned_end: str | None, *, allow_child_conflicts: bool = False,
+                    is_active: bool | None = None) -> None:
         self._validate_period(name, planned_start, planned_end, "파트")
         self._validate_weight(weight)
         with self.session_factory.begin() as session:
@@ -215,6 +313,8 @@ class AdministrationService:
                 ]
                 raise ValidationError("새 기간을 벗어나는 업무가 있습니다:\n" + "\n".join(details))
             part.name, part.weight, part.planned_start, part.planned_end = name.strip(), weight, planned_start, planned_end
+            if is_active is not None:
+                part.is_active = int(is_active)
             part.updated_at = utc_now_iso()
             self._touch_project(session, part.project_id)
 

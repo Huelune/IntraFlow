@@ -3,3 +3,6 @@ current_user_id = "00000000-0000-4000-8000-000000000000"
 current_device_id = "00000000-0000-4000-8000-000000000000"
 # A mounted network drive or UNC path. The local SQLite database never belongs here.
 nas_root_path = "Z:/IntraFlow"
+# Workstation-only automatic Pull preferences. Push is always manual.
+auto_pull_enabled = false
+auto_pull_interval_minutes = 5

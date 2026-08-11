@@ -54,7 +54,7 @@ class WorkService:
 
     def create_my_work_item(
         self, part_id: str, name: str, description: str | None, total_quantity: float,
-        unit_id: str, weight: float, planned_start: str, planned_end: str,
+        unit_id: str, weight: float, planned_start: str, planned_end: str, *, is_active: bool = True,
     ) -> str:
         self._validate_fields(name, total_quantity, weight, planned_start, planned_end)
         now, item_id, assignment_id = utc_now_iso(), str(uuid4()), str(uuid4())
@@ -70,7 +70,7 @@ class WorkService:
                 name=name.strip(), description=(description or "").strip() or None,
                 total_quantity=total_quantity, unit_id=unit_id, weight=weight,
                 planned_start=planned_start, planned_end=planned_end, sort_order=0,
-                is_active=1, is_deleted=0, created_at=now, updated_at=now,
+                is_active=int(is_active), is_deleted=0, created_at=now, updated_at=now,
             ))
             # There is intentionally no ORM relationship between the public work
             # definition and its internal assignment. Persist the parent first so
@@ -78,7 +78,7 @@ class WorkService:
             session.flush()
             session.add(Assignment(
                 id=assignment_id, work_item_id=item_id, user_id=self.current_user_id,
-                allocated_quantity=total_quantity, status="ACTIVE", is_deleted=0,
+                allocated_quantity=total_quantity, status="ACTIVE" if is_active else "CANCELLED", is_deleted=0,
                 created_at=now, updated_at=now,
             ))
             self._mark_dirty(session)
@@ -86,14 +86,18 @@ class WorkService:
 
     def update_my_work_item(
         self, item_id: str, name: str, description: str | None, total_quantity: float,
-        unit_id: str, weight: float, planned_start: str, planned_end: str,
+        unit_id: str, weight: float, planned_start: str, planned_end: str, *,
+        is_active: bool | None = None, part_id: str | None = None,
     ) -> None:
         self._validate_fields(name, total_quantity, weight, planned_start, planned_end)
         with self.session_factory.begin() as session:
             item, assignment = self._owned_item(session, item_id)
-            part = session.get(Part, item.part_id)
+            target_part_id = part_id or item.part_id
+            part = session.get(Part, target_part_id)
             if part is None or part.is_deleted:
                 raise NotFoundError("상위 파트를 찾을 수 없습니다.")
+            if target_part_id != item.part_id:
+                self._active_parent(session, target_part_id)
             self._validate_within_parent(planned_start, planned_end, part.planned_start, part.planned_end)
             unit = session.get(Unit, unit_id)
             if unit is None or not unit.is_active:
@@ -103,9 +107,13 @@ class WorkService:
             if total_quantity < completed:
                 raise ValidationError("목표 수량은 현재 완료량보다 작을 수 없습니다.")
             item.name, item.description = name.strip(), (description or "").strip() or None
+            item.part_id = target_part_id
             item.total_quantity, item.unit_id, item.weight = total_quantity, unit_id, weight
             item.planned_start, item.planned_end, item.updated_at = planned_start, planned_end, utc_now_iso()
             assignment.allocated_quantity, assignment.updated_at = total_quantity, item.updated_at
+            if is_active is not None:
+                item.is_active = int(is_active)
+                assignment.status = "ACTIVE" if is_active else "CANCELLED"
             self._mark_dirty(session)
 
     def set_my_work_item_active(self, item_id: str, active: bool) -> None:
@@ -128,6 +136,13 @@ class WorkService:
             raise NotFoundError("내 업무를 찾을 수 없습니다.")
         return rows[0]
 
+    def get_team_work_item(self, item_id: str) -> WorkItemView:
+        self._ensure_active_user()
+        rows = [row for row in self.list_team_work_items(include_inactive=True) if row.work_item_id == item_id]
+        if not rows:
+            raise NotFoundError("업무를 찾을 수 없습니다.")
+        return rows[0]
+
     def list_my_work_items(self, *, include_inactive: bool = False) -> list[WorkItemView]:
         return [row for row in self._list(include_inactive) if row.owner_user_id == self.current_user_id]
 
@@ -139,6 +154,10 @@ class WorkService:
             return [(x.id, x.name) for x in session.scalars(select(Project).where(
                 Project.is_deleted == 0, Project.status == "ACTIVE"
             ).order_by(Project.name))]
+
+    def current_user_name(self) -> str:
+        with self.session_factory() as session:
+            return self._current_user(session).display_name
 
     def parts_for_project(self, project_id: str) -> list[tuple[str, str, str | None, str | None]]:
         with self.session_factory() as session:
@@ -198,6 +217,10 @@ class WorkService:
         if user is None or not user.is_active:
             raise PermissionDeniedError("현재 사용자가 없거나 비활성 상태입니다.")
         return user
+
+    def _ensure_active_user(self) -> None:
+        with self.session_factory() as session:
+            self._current_user(session)
 
     @staticmethod
     def _active_parent(session: Session, part_id: str) -> tuple[Part, Project]:

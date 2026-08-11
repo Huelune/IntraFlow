@@ -19,7 +19,19 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     window.resize(1000, 650)
     window.show()
     app.processEvents()
-    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["내 업무", "팀 업무", "관리"]
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == [
+        "내 업무", "팀 업무", "관리", "개인 설정",
+    ]
+    assert window.local_refresh_timer.interval() == 5_000
+    assert window.my_work.detail.title.text() == "업무"
+    window.my_work.detail.note.setPlainText("저장하지 않은 메모")
+    window.refresh_current_tab(automatic=True)
+    assert window.my_work.detail.note.toPlainText() == "저장하지 않은 메모"
+    window.settings_widget.enabled.setChecked(True)
+    window.settings_widget.interval.setCurrentIndex(window.settings_widget.interval.findData(30))
+    window.settings_widget.refresh(automatic=True)
+    assert window.settings_widget.enabled.isChecked() is True
+    assert window.settings_widget.interval.currentData() == 30
     assert window.my_work.table.rowCount() == 1
     assert isinstance(window.my_work.table.cellWidget(0, 6), QProgressBar)
     progress.add_delta(item.assignment_id, 5, "진행")
@@ -27,6 +39,7 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     app.processEvents()
     assert window.my_work.table.cellWidget(0, 6).value() == 50
     assert window.team_work.table.rowCount() == 1
+    assert window.team_work.detail.history.rowCount() == 1
     normal_width = window.my_work.table.width()
     window.resize(1440, 900)
     app.processEvents()

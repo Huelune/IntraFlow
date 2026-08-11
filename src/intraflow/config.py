@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,8 @@ class AppSettings:
             current_user_id=os.getenv("INTRAFLOW_CURRENT_USER_ID", str(values.get("current_user_id", ""))) or None,
             current_device_id=os.getenv("INTRAFLOW_CURRENT_DEVICE_ID", str(values.get("current_device_id", ""))) or None,
             nas_root_path=os.getenv("INTRAFLOW_NAS_ROOT_PATH", str(values.get("nas_root_path", ""))) or None,
+            auto_pull_enabled=bool(values.get("auto_pull_enabled", False)),
+            auto_pull_interval_minutes=_valid_pull_interval(values.get("auto_pull_interval_minutes", 5)),
         )
 
     def save_runtime_config(self, runtime: "RuntimeConfig") -> None:
@@ -50,9 +53,22 @@ class AppSettings:
             f"current_user_id = {json.dumps(runtime.current_user_id or '')}",
             f"current_device_id = {json.dumps(runtime.current_device_id or '')}",
             f"nas_root_path = {json.dumps(runtime.nas_root_path or '')}",
+            f"auto_pull_enabled = {'true' if runtime.auto_pull_enabled else 'false'}",
+            f"auto_pull_interval_minutes = {runtime.auto_pull_interval_minutes}",
             "",
         ])
-        self.config_path.write_text(content, encoding="utf-8", newline="\n")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{self.config_path.name}.", suffix=".tmp", dir=self.config_path.parent,
+        )
+        temporary_path = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary_path.replace(self.config_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +76,8 @@ class RuntimeConfig:
     current_user_id: str | None
     current_device_id: str | None
     nas_root_path: str | None
+    auto_pull_enabled: bool = False
+    auto_pull_interval_minutes: int = 5
 
     def require_user_id(self) -> str:
         if not self.current_user_id:
@@ -68,3 +86,11 @@ class RuntimeConfig:
 
 
 settings = AppSettings()
+
+
+def _valid_pull_interval(value: object) -> int:
+    try:
+        interval = int(value)
+    except (TypeError, ValueError):
+        return 5
+    return interval if interval in {1, 5, 10, 30, 60} else 5

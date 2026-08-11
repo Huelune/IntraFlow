@@ -2,51 +2,61 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtWidgets import QGridLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from intraflow.services.errors import IntraFlowError
-from intraflow.sync.sync_service import SyncService
+from intraflow.ui.sync_controller import SyncController
 
 
 class SyncWidget(QWidget):
-    def __init__(self, service: SyncService, on_changed: Callable[[], None]) -> None:
+    def __init__(self, controller: SyncController, on_changed: Callable[[], None]) -> None:
         super().__init__()
-        self.service = service
-        self.on_changed = on_changed
-        self.last_sync = QLabel()
-        self.pending = QLabel()
-        self.error = QLabel()
-        pull, push, synchronize = QPushButton("Pull"), QPushButton("Push"), QPushButton("전체 동기화")
-        pull.clicked.connect(lambda: self._run("Pull", self.service.pull_all))
-        push.clicked.connect(lambda: self._run("Push", self.service.push_all))
-        synchronize.clicked.connect(lambda: self._run("전체 동기화", self.service.synchronize))
-        status = QGridLayout()
-        status.addWidget(QLabel("마지막 동기화"), 0, 0)
-        status.addWidget(self.last_sync, 0, 1)
-        status.addWidget(QLabel("대기 항목"), 1, 0)
-        status.addWidget(self.pending, 1, 1)
-        status.addWidget(QLabel("최근 오류"), 2, 0)
-        status.addWidget(self.error, 2, 1)
-        status.addWidget(pull, 3, 0)
-        status.addWidget(push, 3, 1)
-        status.addWidget(synchronize, 4, 0, 1, 2)
+        self.controller, self.on_changed = controller, on_changed
+        self.last_sync, self.pending, self.state, self.error = QLabel(), QLabel(), QLabel(), QLabel()
+        self.error.setProperty("status", "error")
+        self.pull, self.push, self.synchronize = QPushButton("Pull"), QPushButton("Push"), QPushButton("전체 동기화")
+        self.pull.clicked.connect(lambda: controller.pull(automatic=False))
+        self.push.clicked.connect(controller.push)
+        self.synchronize.clicked.connect(controller.synchronize)
+        self.synchronize.setProperty("primary", True)
+        form = QFormLayout()
+        form.addRow("현재 상태", self.state)
+        form.addRow("마지막 동기화", self.last_sync)
+        form.addRow("Outbox 대기", self.pending)
+        form.addRow("최근 오류", self.error)
+        actions = QHBoxLayout()
+        for button in (self.pull, self.push, self.synchronize):
+            actions.addWidget(button)
+        actions.addStretch()
+        card = QWidget()
+        card.setProperty("card", True)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 20, 20, 20)
+        title = QLabel("NAS 동기화")
+        title.setProperty("role", "title")
+        card_layout.addWidget(title)
+        card_layout.addLayout(form)
+        card_layout.addLayout(actions)
+        card_layout.addStretch()
         layout = QVBoxLayout(self)
-        layout.addLayout(status)
-        layout.addStretch()
+        layout.addWidget(card)
+        controller.status_changed.connect(self.refresh)
+        controller.succeeded.connect(self._completed)
+        controller.failed.connect(self._failed)
         self.refresh()
 
-    def refresh(self) -> None:
-        status = self.service.status()
-        self.last_sync.setText(status.last_sync_at or "아직 동기화하지 않음")
-        self.pending.setText(str(status.pending_count))
-        self.error.setText(status.last_error or "없음")
+    def refresh(self, *_args, automatic: bool = False) -> None:
+        status = self.controller.service.status() if self.controller.service else None
+        self.state.setText(self.controller.status_text)
+        self.last_sync.setText(status.last_sync_at if status and status.last_sync_at else "아직 동기화하지 않음")
+        self.pending.setText(str(status.pending_count) if status else "-")
+        self.error.setText(self.controller.last_error or (status.last_error if status else None) or "없음")
+        enabled = not self.controller.busy and self.controller.service is not None
+        for button in (self.pull, self.push, self.synchronize):
+            button.setEnabled(enabled)
 
-    def _run(self, title: str, action: Callable[[], object]) -> None:
-        try:
-            result = action()
-        except IntraFlowError as exc:
-            QMessageBox.warning(self, f"{title} 실패", f"로컬 데이터는 유지됩니다.\n{exc}")
-        else:
-            QMessageBox.information(self, title, f"처리 결과: {result}")
+    def _completed(self, _name: str, _automatic: bool, _result: object) -> None:
         self.refresh()
         self.on_changed()
+
+    def _failed(self, _name: str, _automatic: bool, _error: str) -> None:
+        self.refresh()

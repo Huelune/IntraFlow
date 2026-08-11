@@ -6,7 +6,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from intraflow.models import Assignment, AssignmentProgress, Part, ProgressHistory, Project, SyncOutbox, WorkItem
+from intraflow.models import Assignment, AssignmentProgress, Part, ProgressHistory, Project, SyncOutbox, User, WorkItem
 from intraflow.repositories import AssignmentRepository, ProgressRepository
 from intraflow.services.errors import NotFoundError, PermissionDeniedError, ValidationError
 from intraflow.timeutil import utc_now_iso
@@ -41,7 +41,7 @@ class ProgressService:
 
     def add_delta(self, assignment_id: str, delta: float, note: str | None = None) -> ProgressUpdateResult:
         if delta == 0:
-            raise ValidationError("delta must not be zero")
+            raise ValidationError("증감량은 0이 아니어야 합니다.")
 
         session = self.session_factory()
         try:
@@ -53,7 +53,7 @@ class ProgressService:
                 if assignment is None or assignment.is_deleted:
                     raise NotFoundError(f"assignment not found: {assignment_id}")
                 if assignment.status != "ACTIVE":
-                    raise ValidationError("cancelled/inactive assignment cannot be updated")
+                    raise ValidationError("취소되었거나 비활성인 업무는 진행량을 변경할 수 없습니다.")
                 self._validate_owned_active_assignment(session, assignment)
 
                 progress = progress_repo.get_progress(assignment_id)
@@ -69,15 +69,15 @@ class ProgressService:
                     progress_repo.add_progress(progress)
 
                 if progress.user_id != self.current_user_id:
-                    raise PermissionDeniedError("progress owner mismatch")
+                    raise PermissionDeniedError("업무와 진행 정보의 소유자가 일치하지 않습니다.")
 
                 previous = float(progress.completed_quantity)
                 current = previous + float(delta)
 
                 if current < 0:
-                    raise ValidationError("completed quantity cannot be negative")
+                    raise ValidationError("완료량은 0보다 작을 수 없습니다.")
                 if current > float(assignment.allocated_quantity):
-                    raise ValidationError("completed quantity cannot exceed allocated quantity")
+                    raise ValidationError("완료량은 목표량을 초과할 수 없습니다.")
 
                 now = utc_now_iso()
                 progress.completed_quantity = current
@@ -159,6 +159,23 @@ class ProgressService:
                 raise NotFoundError("업무 진행 정보를 찾을 수 없습니다.")
             if assignment.user_id != self.current_user_id:
                 raise PermissionDeniedError("업무 소유자만 진행 이력을 조회할 수 있습니다.")
+            return list(session.scalars(
+                select(ProgressHistory).where(ProgressHistory.assignment_id == assignment_id)
+                .order_by(ProgressHistory.created_at.desc())
+            ))
+
+    def list_public_history(self, assignment_id: str) -> list[ProgressHistory]:
+        """Return shared progress history without granting mutation permission."""
+        with self.session_factory() as session:
+            current = session.get(User, self.current_user_id)
+            if current is None or not current.is_active:
+                raise PermissionDeniedError("활성 사용자만 공개 진행 이력을 조회할 수 있습니다.")
+            assignment = session.get(Assignment, assignment_id)
+            if assignment is None or assignment.is_deleted:
+                raise NotFoundError("업무 진행 정보를 찾을 수 없습니다.")
+            item = session.get(WorkItem, assignment.work_item_id)
+            if item is None or item.is_deleted or item.owner_user_id != assignment.user_id:
+                raise NotFoundError("공개 업무 정보를 찾을 수 없습니다.")
             return list(session.scalars(
                 select(ProgressHistory).where(ProgressHistory.assignment_id == assignment_id)
                 .order_by(ProgressHistory.created_at.desc())
