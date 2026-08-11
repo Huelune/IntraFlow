@@ -5,8 +5,8 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLineEdit,
-    QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget,
-    QVBoxLayout, QWidget,
+    QLabel, QMessageBox, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from intraflow.services.administration_service import AdministrationService
@@ -70,7 +70,7 @@ class AdministrationWidget(QWidget):
         form.addRow("표시 이름", self.unit_name)
         form.addRow("정렬 순서", self.unit_order)
         form.addRow(add, disable)
-        self.tabs.addTab(self._page(self.unit_table, form), "단위")
+        self.unit_tab_index = self.tabs.addTab(self._page(self.unit_table, form), "단위")
 
     def _build_projects(self) -> None:
         self.project_table.setHorizontalHeaderLabels(["프로젝트", "상태", "시작일", "종료일"])
@@ -122,24 +122,34 @@ class AdministrationWidget(QWidget):
         self.work_total = self._quantity(1_000_000, 1)
         self.work_weight = self._quantity(1.0, 1.0)
         self.work_start, self.work_end = self._date_inputs()
-        add = QPushButton("업무 추가")
-        add.clicked.connect(lambda: self._act(lambda: self.service.create_work_item(
+        self.work_add_button = QPushButton("업무 추가")
+        self.work_add_button.clicked.connect(lambda: self._act(lambda: self.service.create_work_item(
             self.work_part.currentData(), self.work_name.text(), self.work_total.value(),
             self.work_unit.currentData(), self.work_weight.value(),
             self.work_start.text() or None, self.work_end.text() or None)))
-        update = QPushButton("선택 업무 수정")
-        update.clicked.connect(lambda: self._selected_action(self.work_table, lambda value: self.service.update_work_item(
+        self.work_update_button = QPushButton("선택 업무 수정")
+        self.work_update_button.clicked.connect(lambda: self._selected_action(self.work_table, lambda value: self.service.update_work_item(
             value, self.work_name.text(), self.work_total.value(), self.work_unit.currentData(), self.work_weight.value(),
             self.work_start.text() or None, self.work_end.text() or None)))
+        self.work_manage_units_button = QPushButton("단위 추가/관리")
+        self.work_manage_units_button.clicked.connect(
+            lambda: self.tabs.setCurrentIndex(self.unit_tab_index)
+        )
+        unit_row = QHBoxLayout()
+        unit_row.addWidget(self.work_unit, stretch=1)
+        unit_row.addWidget(self.work_manage_units_button)
+        self.work_unit_hint = QLabel("등록된 단위가 없습니다. 먼저 단위를 추가하세요.")
+        self.work_unit_hint.setStyleSheet("color: #b45309;")
         form = QFormLayout()
         form.addRow("파트", self.work_part)
         form.addRow("업무명", self.work_name)
         form.addRow("총 수량", self.work_total)
-        form.addRow("단위", self.work_unit)
+        form.addRow("단위", unit_row)
+        form.addRow("", self.work_unit_hint)
         form.addRow("가중치", self.work_weight)
         form.addRow("시작일", self.work_start)
         form.addRow("종료일", self.work_end)
-        form.addRow(add, update)
+        form.addRow(self.work_add_button, self.work_update_button)
         self.tabs.addTab(self._page(self.work_table, form), "업무")
 
     def _build_assignments(self) -> None:
@@ -186,6 +196,13 @@ class AdministrationWidget(QWidget):
             index = combo.findData(current)
             if index >= 0:
                 combo.setCurrentIndex(index)
+        has_units = bool(choices["units"])
+        if not has_units:
+            self.work_unit.addItem("등록된 단위가 없습니다", None)
+        self.work_unit.setEnabled(has_units)
+        self.work_add_button.setEnabled(has_units)
+        self.work_update_button.setEnabled(has_units)
+        self.work_unit_hint.setVisible(not has_units)
 
     def _act(self, action: Callable[[], object]) -> None:
         try:
