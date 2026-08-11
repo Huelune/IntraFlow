@@ -60,8 +60,8 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(String)
-    planned_start: Mapped[Optional[str]] = mapped_column(String)
-    planned_end: Mapped[Optional[str]] = mapped_column(String)
+    planned_start: Mapped[str] = mapped_column(String, nullable=False)
+    planned_end: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     revision: Mapped[int] = mapped_column(default=1, nullable=False)
     is_deleted: Mapped[int] = mapped_column(default=0, nullable=False)
@@ -88,6 +88,7 @@ class Part(Base):
     __table_args__ = (
         CheckConstraint("weight > 0 AND weight <= 1", name="parts_weight"),
         CheckConstraint(BOOL_CHECK.format("is_deleted"), name="parts_deleted_bool"),
+        CheckConstraint(BOOL_CHECK.format("is_active"), name="parts_active_bool"),
         CheckConstraint(
             "planned_end IS NULL OR planned_start IS NULL OR planned_end >= planned_start",
             name="parts_period",
@@ -99,9 +100,10 @@ class Part(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     weight: Mapped[float] = mapped_column(nullable=False)
-    planned_start: Mapped[Optional[str]] = mapped_column(String)
-    planned_end: Mapped[Optional[str]] = mapped_column(String)
+    planned_start: Mapped[str] = mapped_column(String, nullable=False)
+    planned_end: Mapped[str] = mapped_column(String, nullable=False)
     sort_order: Mapped[int] = mapped_column(default=0, nullable=False)
+    is_active: Mapped[int] = mapped_column(default=1, nullable=False)
     is_deleted: Mapped[int] = mapped_column(default=0, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -126,22 +128,27 @@ class WorkItem(Base):
         CheckConstraint("total_quantity >= 0", name="work_items_total_quantity"),
         CheckConstraint("weight > 0 AND weight <= 1", name="work_items_weight"),
         CheckConstraint(BOOL_CHECK.format("is_deleted"), name="work_items_deleted_bool"),
+        CheckConstraint(BOOL_CHECK.format("is_active"), name="work_items_active_bool"),
         CheckConstraint(
             "planned_end IS NULL OR planned_start IS NULL OR planned_end >= planned_start",
             name="work_items_period",
         ),
         Index("idx_work_items_part_sort", "part_id", "sort_order"),
+        Index("idx_work_items_owner_active", "owner_user_id", "is_active"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     part_id: Mapped[str] = mapped_column(ForeignKey("parts.id", ondelete="RESTRICT"), nullable=False)
+    owner_user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String)
     total_quantity: Mapped[float] = mapped_column(nullable=False)
     unit_id: Mapped[str] = mapped_column(ForeignKey("units.id", ondelete="RESTRICT"), nullable=False)
     weight: Mapped[float] = mapped_column(nullable=False)
-    planned_start: Mapped[Optional[str]] = mapped_column(String)
-    planned_end: Mapped[Optional[str]] = mapped_column(String)
+    planned_start: Mapped[str] = mapped_column(String, nullable=False)
+    planned_end: Mapped[str] = mapped_column(String, nullable=False)
     sort_order: Mapped[int] = mapped_column(default=0, nullable=False)
+    is_active: Mapped[int] = mapped_column(default=1, nullable=False)
     is_deleted: Mapped[int] = mapped_column(default=0, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -152,7 +159,7 @@ class Assignment(Base):
     __table_args__ = (
         CheckConstraint("allocated_quantity >= 0", name="assignments_allocated_quantity"),
         CheckConstraint(BOOL_CHECK.format("is_deleted"), name="assignments_deleted_bool"),
-        UniqueConstraint("work_item_id", "user_id", name="uq_assignments_work_item_user"),
+        UniqueConstraint("work_item_id", name="uq_assignments_work_item"),
         Index("idx_assignments_work_item", "work_item_id"),
         Index("idx_assignments_user", "user_id"),
     )

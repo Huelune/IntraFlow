@@ -1,21 +1,37 @@
 from __future__ import annotations
 
+import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
-from intraflow.services.assignment_service import AssignmentService
-from intraflow.services.progress_service import ProgressService
+from intraflow.services.errors import PermissionDeniedError, ValidationError
+from intraflow.services.setup_service import SetupService
+from intraflow.services.work_service import WorkService
 
-from test_progress_service import seed_assignment
+from workflow import build_workflow
 
 
-def test_list_active_assignments_includes_derived_progress(session_factory: sessionmaker[Session]) -> None:
-    assignment_id, user_id, device_id = seed_assignment(session_factory)
-    ProgressService(session_factory, current_user_id=user_id, current_device_id=device_id).add_delta(assignment_id, 10)
+def test_owner_can_update_and_delete_work(session_factory: sessionmaker[Session]) -> None:
+    _identity, _admin, work, _project, _part, item = build_workflow(session_factory)
+    work.update_my_work_item(item.work_item_id, "수정 업무", "수정", 20, item.unit_id, 1,
+                             "2026-08-03", "2026-08-21")
+    updated = work.get_my_work_item(item.work_item_id)
+    assert updated.name == "수정 업무"
+    assert updated.total_quantity == 20
+    work.delete_my_work_item(item.work_item_id)
+    assert work.list_my_work_items(include_inactive=True) == []
 
-    assignments = AssignmentService(session_factory, current_user_id=user_id).list_active()
 
-    assert len(assignments) == 1
-    assert assignments[0].assignment_id == assignment_id
-    assert assignments[0].completed_quantity == 10
-    assert assignments[0].allocated_quantity == 50
-    assert assignments[0].progress_ratio == 0.2
+def test_admin_cannot_modify_another_users_work(session_factory: sessionmaker[Session]) -> None:
+    _identity, admin, _work, _project, _part, item = build_workflow(session_factory)
+    admin_id = admin.create_user("admin2", "Admin2", is_system_admin=True)
+    other = WorkService(session_factory, current_user_id=admin_id)
+    with pytest.raises(PermissionDeniedError):
+        other.set_my_work_item_active(item.work_item_id, False)
+
+
+def test_work_period_and_total_are_validated(session_factory: sessionmaker[Session]) -> None:
+    identity, _admin, work, _project, _part, item = build_workflow(session_factory)
+    with pytest.raises(ValidationError, match="상위 파트"):
+        work.update_my_work_item(item.work_item_id, item.name, None, 10, item.unit_id, 1,
+                                 "2026-07-01", "2026-08-10")
+    assert identity.user_id

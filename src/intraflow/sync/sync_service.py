@@ -23,7 +23,7 @@ class SyncService:
         self.session_factory = session_factory
         self.nas = nas
         self.current_user_id = current_user_id
-        self.push_service = PushService(session_factory, nas)
+        self.push_service = PushService(session_factory, nas, current_user_id=current_user_id)
         self.pull_service = PullService(session_factory, nas)
 
     def status(self) -> SyncStatus:

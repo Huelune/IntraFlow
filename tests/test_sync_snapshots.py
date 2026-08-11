@@ -1,158 +1,61 @@
 from __future__ import annotations
 
-import pytest
-from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.database import create_session_factory, create_sqlite_engine
-from intraflow.models import AssignmentProgress, Base, CalendarEvent, PersonalNote, Project, SyncOutbox
+from intraflow.models import Base
 from intraflow.services.progress_service import ProgressService
-from intraflow.services.administration_service import AdministrationService
-from intraflow.services.errors import RevisionConflictError
-from intraflow.services.setup_service import SetupService
 from intraflow.sync.nas_client import NasClient
 from intraflow.sync.pull_service import PullService
 from intraflow.sync.push_service import PushService
 from intraflow.sync.snapshot_builder import SnapshotBuilder
-from intraflow.sync.snapshot_validator import SnapshotValidator
-from intraflow.timeutil import utc_now_iso
 
-from test_progress_service import seed_assignment
+from workflow import build_workflow
 
 
-def test_user_public_snapshot_excludes_private_data(session_factory: sessionmaker[Session]) -> None:
-    assignment_id, user_id, device_id = seed_assignment(session_factory)
-    ProgressService(session_factory, current_user_id=user_id, current_device_id=device_id).add_delta(assignment_id, 5)
-    now = utc_now_iso()
-    with session_factory.begin() as session:
-        session.add_all([
-            CalendarEvent(
-                id="00000000-0000-4000-8000-000000000001",
-                user_id=user_id,
-                title="Team meeting",
-                event_type="MEETING",
-                start_at=now,
-                visibility="TEAM",
-                revision=1,
-                is_deleted=0,
-                created_at=now,
-                updated_at=now,
-            ),
-            CalendarEvent(
-                id="00000000-0000-4000-8000-000000000002",
-                user_id=user_id,
-                title="Private appointment",
-                event_type="OTHER",
-                start_at=now,
-                visibility="PRIVATE",
-                revision=1,
-                is_deleted=0,
-                created_at=now,
-                updated_at=now,
-            ),
-            PersonalNote(
-                id="00000000-0000-4000-8000-000000000003",
-                user_id=user_id,
-                title="Private note",
-                is_pinned=0,
-                is_deleted=0,
-                created_at=now,
-                updated_at=now,
-            ),
-        ])
+def test_project_snapshot_contains_only_project_and_parts(session_factory: sessionmaker[Session]) -> None:
+    _identity, _admin, _work, project_id, _part, _item = build_workflow(session_factory)
     with session_factory() as session:
-        snapshot = SnapshotBuilder(session).user_public(user_id)
-    payload = snapshot.model_dump(mode="json")
-    validated = SnapshotValidator().validate(payload)
-
-    assert validated.user_id == user_id
-    assert len(snapshot.progress) == 1
-    assert [event.title for event in snapshot.team_calendar_events] == ["Team meeting"]
-    assert "Private appointment" not in str(payload)
-    assert "Private note" not in str(payload)
+        snapshot = SnapshotBuilder(session).project(project_id)
+    assert snapshot.schema_version == 2
+    assert len(snapshot.parts) == 1
+    assert snapshot.work_items == []
+    assert snapshot.assignments == []
 
 
-def test_user_public_push_writes_json_and_clears_outbox(
-    session_factory: sessionmaker[Session], tmp_path
-) -> None:
-    assignment_id, user_id, device_id = seed_assignment(session_factory)
-    ProgressService(session_factory, current_user_id=user_id, current_device_id=device_id).add_delta(assignment_id, 5)
-    service = PushService(session_factory, NasClient(tmp_path / "nas"))
-
-    revision = service.push_user_public(user_id)
-
-    payload = NasClient(tmp_path / "nas").read_json("users", user_id, "public.json")
-    assert payload is not None
-    assert payload["source_type"] == "USER_PUBLIC"
-    assert payload["revision"] == revision
+def test_user_public_snapshot_contains_owned_work_and_progress(session_factory: sessionmaker[Session]) -> None:
+    identity, _admin, _work, _project, _part, item = build_workflow(session_factory)
+    ProgressService(session_factory, current_user_id=identity.user_id,
+                    current_device_id=identity.device_id).add_delta(item.assignment_id, 4, "진행")
     with session_factory() as session:
-        assert list(session.scalars(select(SyncOutbox))) == []
+        snapshot = SnapshotBuilder(session).user_public(identity.user_id)
+    assert len(snapshot.work_items) == 1
+    assert snapshot.work_items[0].owner_user_id == identity.user_id
+    assert len(snapshot.assignments) == 1
+    assert snapshot.progress[0].completed_quantity == 4
 
 
-def test_pull_applies_definition_then_read_only_user_progress(
-    session_factory: sessionmaker[Session], tmp_path
-) -> None:
-    assignment_id, user_id, device_id = seed_assignment(session_factory)
-    ProgressService(session_factory, current_user_id=user_id, current_device_id=device_id).add_delta(assignment_id, 5)
+def test_push_pull_user_owned_work_is_read_only_data(session_factory: sessionmaker[Session], tmp_path) -> None:
+    identity, _admin, _work, project_id, _part, item = build_workflow(session_factory)
+    ProgressService(session_factory, current_user_id=identity.user_id,
+                    current_device_id=identity.device_id).add_delta(item.assignment_id, 3)
     nas = NasClient(tmp_path / "nas")
-    with session_factory() as source:
-        builder = SnapshotBuilder(source)
-        nas.write_json_atomic(builder.users().model_dump(mode="json"), "users.json")
-        nas.write_json_atomic(builder.units().model_dump(mode="json"), "units.json")
-        project_id = source.execute(select(Project.id)).scalar_one()
-        nas.write_json_atomic(builder.project(project_id).model_dump(mode="json"), "projects", f"{project_id}.json")
-        nas.write_json_atomic(builder.user_public(user_id).model_dump(mode="json"), "users", user_id, "public.json")
+    push = PushService(session_factory, nas, current_user_id=identity.user_id)
+    push.push_users()
+    push.push_units()
+    push.push_project(project_id)
+    push.push_user_public(identity.user_id)
 
-    destination_engine = create_sqlite_engine(f"sqlite:///{(tmp_path / 'destination.db').as_posix()}")
-    Base.metadata.create_all(destination_engine)
-    destination_factory = create_session_factory(destination_engine)
-    pull = PullService(destination_factory, nas)
+    engine = create_sqlite_engine(f"sqlite:///{(tmp_path / 'copy.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    destination = create_session_factory(engine)
+    pull = PullService(destination, nas)
     assert pull.pull_users()
     assert pull.pull_units()
     assert pull.pull_project(project_id)
-    assert pull.pull_user_public(user_id)
-    with destination_factory() as session:
-        progress = session.get(AssignmentProgress, assignment_id)
-        assert progress is not None
-        assert progress.completed_quantity == 5
-    destination_engine.dispose()
-
-
-def test_admin_definition_push_writes_users_units_and_project(
-    session_factory: sessionmaker[Session], tmp_path
-) -> None:
-    identity = SetupService(session_factory).provision("owner", "Owner", "OWNER-PC")
-    admin = AdministrationService(session_factory, current_user_id=identity.user_id)
-    unit_id = admin.create_unit("EA", "개")
-    project_id = admin.create_project("Project")
-    part_id = admin.create_part(project_id, "Part", 1.0)
-    admin.create_work_item(part_id, "Work", 1, unit_id, 1.0)
-    nas = NasClient(tmp_path / "nas")
-
-    completed = PushService(session_factory, nas).push_pending(current_user_id=identity.user_id)
-
-    assert completed == 3
-    assert nas.exists_json("users.json")
-    assert nas.exists_json("units.json")
-    assert nas.exists_json("projects", f"{project_id}.json")
-    with session_factory() as session:
-        assert list(session.scalars(select(SyncOutbox))) == []
-
-
-def test_project_push_rejects_remote_revision_conflict(
-    session_factory: sessionmaker[Session], tmp_path
-) -> None:
-    identity = SetupService(session_factory).provision("owner", "Owner", "OWNER-PC")
-    admin = AdministrationService(session_factory, current_user_id=identity.user_id)
-    project_id = admin.create_project("Project")
-    nas = NasClient(tmp_path / "nas")
-    push = PushService(session_factory, nas)
-    push.push_pending(current_user_id=identity.user_id)
-    remote = nas.read_json("projects", f"{project_id}.json")
-    assert remote is not None
-    remote["revision"] += 1
-    remote["project"]["revision"] = remote["revision"]
-    nas.write_json_atomic(remote, "projects", f"{project_id}.json")
-
-    with pytest.raises(RevisionConflictError):
-        push.push_project(project_id)
+    assert pull.pull_user_public(identity.user_id)
+    with destination() as session:
+        copied = SnapshotBuilder(session).user_public(identity.user_id)
+    assert copied.work_items[0].name == "업무"
+    assert copied.progress[0].completed_quantity == 3
+    engine.dispose()

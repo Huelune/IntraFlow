@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 Id = Annotated[str, Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")]
 UtcTimestamp = Annotated[str, Field(pattern=r"^.+Z$")]
 DateValue = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]
@@ -16,7 +16,7 @@ class SnapshotModel(BaseModel):
 
 
 class SnapshotBase(SnapshotModel):
-    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    schema_version: Literal[1, 2] = SCHEMA_VERSION
     revision: int = Field(ge=0)
     generated_at: UtcTimestamp
 
@@ -63,6 +63,7 @@ class PartData(SnapshotModel):
     planned_start: DateValue | None = None
     planned_end: DateValue | None = None
     sort_order: int
+    is_active: bool = True
     is_deleted: bool
     created_at: UtcTimestamp
     updated_at: UtcTimestamp
@@ -71,13 +72,16 @@ class PartData(SnapshotModel):
 class WorkItemData(SnapshotModel):
     id: Id
     part_id: Id
+    owner_user_id: Id | None = None
     name: str = Field(min_length=1)
+    description: str | None = None
     total_quantity: float = Field(ge=0)
     unit_id: Id
     weight: float = Field(gt=0, le=1)
     planned_start: DateValue | None = None
     planned_end: DateValue | None = None
     sort_order: int
+    is_active: bool = True
     is_deleted: bool
     created_at: UtcTimestamp
     updated_at: UtcTimestamp
@@ -153,13 +157,16 @@ class ProjectSnapshot(SnapshotBase):
     project: ProjectData
     editor_user_ids: list[Id]
     parts: list[PartData]
-    work_items: list[WorkItemData]
-    assignments: list[AssignmentData]
+    # Kept for reading v1 snapshots; v2 project snapshots leave these empty.
+    work_items: list[WorkItemData] = Field(default_factory=list)
+    assignments: list[AssignmentData] = Field(default_factory=list)
 
 
 class UserPublicSnapshot(SnapshotBase):
     source_type: Literal["USER_PUBLIC"] = "USER_PUBLIC"
     user_id: Id
+    work_items: list[WorkItemData] = Field(default_factory=list)
+    assignments: list[AssignmentData] = Field(default_factory=list)
     progress: list[AssignmentProgressData]
     progress_history: list[ProgressHistoryData]
     team_calendar_events: list[CalendarEventData]

@@ -97,12 +97,6 @@ class SnapshotBuilder:
         if project is None:
             raise NotFoundError(f"project not found: {project_id}")
         parts = list(self.session.scalars(select(Part).where(Part.project_id == project.id).order_by(Part.sort_order)))
-        part_ids = [part.id for part in parts]
-        work_items = list(self.session.scalars(
-            select(WorkItem).where(WorkItem.part_id.in_(part_ids)).order_by(WorkItem.sort_order)
-        )) if part_ids else []
-        work_item_ids = [item.id for item in work_items]
-        assignments = list(self.session.scalars(select(Assignment).where(Assignment.work_item_id.in_(work_item_ids)))) if work_item_ids else []
         editors = list(self.session.scalars(select(ProjectEditor.user_id).where(ProjectEditor.project_id == project.id)))
         return ProjectSnapshot(
             revision=project.revision,
@@ -124,24 +118,19 @@ class SnapshotBuilder:
             parts=[PartData(
                 id=part.id, project_id=part.project_id, name=part.name, weight=part.weight,
                 planned_start=part.planned_start, planned_end=part.planned_end, sort_order=part.sort_order,
-                is_deleted=bool(part.is_deleted), created_at=part.created_at, updated_at=part.updated_at,
+                is_active=bool(part.is_active), is_deleted=bool(part.is_deleted),
+                created_at=part.created_at, updated_at=part.updated_at,
             ) for part in parts],
-            work_items=[WorkItemData(
-                id=item.id, part_id=item.part_id, name=item.name, total_quantity=item.total_quantity,
-                unit_id=item.unit_id, weight=item.weight, planned_start=item.planned_start,
-                planned_end=item.planned_end, sort_order=item.sort_order, is_deleted=bool(item.is_deleted),
-                created_at=item.created_at, updated_at=item.updated_at,
-            ) for item in work_items],
-            assignments=[AssignmentData(
-                id=item.id, work_item_id=item.work_item_id, user_id=item.user_id,
-                allocated_quantity=item.allocated_quantity, status=item.status, is_deleted=bool(item.is_deleted),
-                created_at=item.created_at, updated_at=item.updated_at,
-            ) for item in assignments],
         )
 
     def user_public(self, user_id: str) -> UserPublicSnapshot:
         if self.session.get(User, user_id) is None:
             raise NotFoundError(f"user not found: {user_id}")
+        work_items = list(self.session.scalars(select(WorkItem).where(WorkItem.owner_user_id == user_id)))
+        work_item_ids = [item.id for item in work_items]
+        assignments = list(self.session.scalars(select(Assignment).where(
+            Assignment.work_item_id.in_(work_item_ids)
+        ))) if work_item_ids else []
         progress = list(self.session.scalars(select(AssignmentProgress).where(AssignmentProgress.user_id == user_id)))
         cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat(timespec="seconds").replace("+00:00", "Z")
         histories = list(self.session.scalars(
@@ -153,9 +142,21 @@ class SnapshotBuilder:
             select(CalendarEvent).where(CalendarEvent.user_id == user_id, CalendarEvent.visibility == "TEAM")
         ))
         return UserPublicSnapshot(
-            revision=_revision([value.revision for value in progress]),
+            revision=max(_revision([value.revision for value in progress]), len(work_items) + len(histories)),
             generated_at=utc_now_iso(),
             user_id=user_id,
+            work_items=[WorkItemData(
+                id=item.id, part_id=item.part_id, owner_user_id=item.owner_user_id,
+                name=item.name, description=item.description, total_quantity=item.total_quantity,
+                unit_id=item.unit_id, weight=item.weight, planned_start=item.planned_start,
+                planned_end=item.planned_end, sort_order=item.sort_order, is_active=bool(item.is_active),
+                is_deleted=bool(item.is_deleted), created_at=item.created_at, updated_at=item.updated_at,
+            ) for item in work_items],
+            assignments=[AssignmentData(
+                id=item.id, work_item_id=item.work_item_id, user_id=item.user_id,
+                allocated_quantity=item.allocated_quantity, status=item.status,
+                is_deleted=bool(item.is_deleted), created_at=item.created_at, updated_at=item.updated_at,
+            ) for item in assignments],
             progress=[AssignmentProgressData(
                 assignment_id=item.assignment_id, user_id=item.user_id, schedule_start=item.schedule_start,
                 schedule_end=item.schedule_end, completed_quantity=item.completed_quantity, note=item.note,

@@ -1,40 +1,26 @@
 from __future__ import annotations
 
 import os
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 from sqlalchemy.orm import Session, sessionmaker
 
-from intraflow.services.administration_service import AdministrationService
-from intraflow.services.setup_service import SetupService
 from intraflow.ui.administration_widget import AdministrationWidget
+from workflow import build_workflow
 
 
-def test_work_item_unit_selection_guides_empty_state_and_refreshes(
+def test_administration_tree_shows_hierarchy_and_read_only_owner(
     session_factory: sessionmaker[Session],
 ) -> None:
     app = QApplication.instance() or QApplication([])
-    identity = SetupService(session_factory).provision("owner", "Owner", "OWNER-PC")
-    service = AdministrationService(session_factory, current_user_id=identity.user_id)
-    widget = AdministrationWidget(service, lambda: None)
-
-    assert widget.work_unit.currentText() == "등록된 단위가 없습니다"
-    assert not widget.work_unit.isEnabled()
-    assert not widget.work_add_button.isEnabled()
-    assert not widget.work_unit_hint.isHidden()
-    widget.work_manage_units_button.click()
-    assert widget.tabs.currentIndex() == widget.unit_tab_index
-
-    unit_id = service.create_unit("EA", "개")
-    widget.refresh()
+    _identity, admin, work, _project, _part, _item = build_workflow(session_factory)
+    widget = AdministrationWidget(admin, work, lambda: None)
+    widget.show()
     app.processEvents()
-
-    assert widget.work_unit.isEnabled()
-    assert widget.work_unit.currentData() == unit_id
-    assert widget.work_unit.currentText() == "개"
-    assert widget.work_add_button.isEnabled()
-    assert widget.work_unit_hint.isHidden()
-
+    project = widget.tree.topLevelItem(0)
+    assert project.text(0) == "프로젝트"
+    assert project.child(0).text(0) == "파트"
+    assert project.child(0).child(0).text(0) == "업무"
+    assert project.child(0).child(0).text(1) == "Owner"
     widget.close()

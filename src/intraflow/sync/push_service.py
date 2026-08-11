@@ -19,12 +19,17 @@ def _snapshot_hash(payload: dict[str, object]) -> str:
 
 
 class PushService:
-    def __init__(self, session_factory: sessionmaker[Session], nas: NasClient) -> None:
+    def __init__(
+        self, session_factory: sessionmaker[Session], nas: NasClient, *, current_user_id: str,
+    ) -> None:
         self.session_factory = session_factory
         self.nas = nas
+        self.current_user_id = current_user_id
         self.locks = LockManager(nas.root_path)
 
     def push_user_public(self, user_id: str) -> int:
+        if user_id != self.current_user_id:
+            raise PermissionDeniedError("자신의 공개 snapshot만 업로드할 수 있습니다.")
         with self.session_factory() as session:
             snapshot = SnapshotBuilder(session).user_public(user_id)
         remote = self.nas.read_json("users", user_id, "public.json")
@@ -65,6 +70,8 @@ class PushService:
         return self._push_global("UNITS", snapshot, "units.json")
 
     def push_pending(self, *, current_user_id: str) -> int:
+        if current_user_id != self.current_user_id:
+            raise PermissionDeniedError("현재 사용자와 동기화 사용자가 일치하지 않습니다.")
         with self.session_factory() as session:
             targets = list(session.scalars(session.query(SyncOutbox).order_by(SyncOutbox.created_at).statement))
             user = session.get(User, current_user_id)
@@ -81,7 +88,7 @@ class PushService:
                     self.push_users()
                 elif target.target_type == "UNITS" and is_admin:
                     self.push_units()
-                elif target.target_type == "PROJECT" and target.target_id in editable_projects:
+                elif target.target_type == "PROJECT" and (is_admin or target.target_id in editable_projects):
                     self.push_project(target.target_id)
                 else:
                     raise PermissionDeniedError("해당 동기화 대상을 업로드할 권한이 없습니다.")

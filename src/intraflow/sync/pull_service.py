@@ -103,9 +103,37 @@ class PullService:
                 return False
             if session.get(User, user_id) is None:
                 raise SyncError("pull users before user public progress")
+            for data in snapshot.work_items:
+                if data.owner_user_id != user_id:
+                    raise SyncError("user public snapshot contains work owned by another user")
+                if session.get(Part, data.part_id) is None or session.get(Unit, data.unit_id) is None:
+                    raise SyncError("pull projects and units before user-owned work")
+                value = session.get(WorkItem, data.id)
+                if value is None:
+                    value = WorkItem(id=data.id)
+                    session.add(value)
+                elif value.owner_user_id != user_id:
+                    raise SyncError("user public snapshot cannot replace another owner's work")
+                for field, item in data.model_dump().items():
+                    if field != "id":
+                        setattr(value, field, int(item) if field in {"is_active", "is_deleted"} else item)
+            session.flush()
+            for data in snapshot.assignments:
+                if data.user_id != user_id or session.get(WorkItem, data.work_item_id) is None:
+                    raise SyncError("user public assignment ownership is invalid")
+                value = session.get(Assignment, data.id)
+                if value is None:
+                    value = Assignment(id=data.id)
+                    session.add(value)
+                elif value.user_id != user_id:
+                    raise SyncError("user public snapshot cannot replace another user's assignment")
+                for field, item in data.model_dump().items():
+                    if field != "id":
+                        setattr(value, field, int(item) if field == "is_deleted" else item)
+            session.flush()
             for data in snapshot.progress:
                 if session.get(Assignment, data.assignment_id) is None:
-                    raise SyncError("pull project definitions before user public progress")
+                    raise SyncError("pull user-owned work before user public progress")
                 value = session.get(AssignmentProgress, data.assignment_id)
                 if value is None:
                     value = AssignmentProgress(assignment_id=data.assignment_id)
@@ -177,27 +205,7 @@ class PullService:
                 session.add(value)
             for field, item in data.model_dump().items():
                 if field != "id":
-                    setattr(value, field, int(item) if field == "is_deleted" else item)
-        for data in snapshot.work_items:
-            if session.get(Unit, data.unit_id) is None:
-                raise SyncError("pull units before project definitions")
-            value = session.get(WorkItem, data.id)
-            if value is None:
-                value = WorkItem(id=data.id)
-                session.add(value)
-            for field, item in data.model_dump().items():
-                if field != "id":
-                    setattr(value, field, int(item) if field == "is_deleted" else item)
-        for data in snapshot.assignments:
-            if session.get(User, data.user_id) is None:
-                raise SyncError("pull users before project assignments")
-            value = session.get(Assignment, data.id)
-            if value is None:
-                value = Assignment(id=data.id)
-                session.add(value)
-            for field, item in data.model_dump().items():
-                if field != "id":
-                    setattr(value, field, int(item) if field == "is_deleted" else item)
+                    setattr(value, field, int(item) if field in {"is_active", "is_deleted"} else item)
         existing = {item.user_id: item for item in session.query(ProjectEditor).filter_by(project_id=project.id)}
         desired = set(snapshot.editor_user_ids)
         for user_id, value in existing.items():
