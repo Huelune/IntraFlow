@@ -83,6 +83,8 @@ Windows의 라이트·다크 모드를 자동으로 감지해 앱 전체 Palette
 .\scripts\build-windows.cmd -Clean
 ```
 
+CMD 래퍼는 코드 페이지와 PowerShell·Python 출력을 UTF-8로 맞춥니다. 그래도 한글이 네모나 물음표로 보이면 Windows Terminal을 사용하고 프로필 글꼴을 `Cascadia Mono`, `맑은 고딕` 또는 다른 한글 지원 글꼴로 변경하세요.
+
 완성된 폴더와 ZIP은 `release/`에 생성됩니다. 두 번째 빌드부터 패키지 설치를 생략하려면 다음처럼 실행합니다.
 
 ```powershell
@@ -114,6 +116,7 @@ PowerShell에서 `.ps1`을 명시적으로 실행하려면 호출 연산자를 �
 - `-SkipTests`: 자동 테스트 생략
 - `-SkipInstall`: 기존 `.build-venv`의 패키지를 그대로 사용
 - `-AllowCompilerDownload`: Visual Studio C 컴파일러가 없을 때 Nuitka MinGW64 사용
+- `-Help`: 한글 빌드 명령 도움말 표시
 
 스크립트는 `alembic.ini`와 migration Python 파일을 압축 리소스로 포함합니다. 실행 시 이 리소스는 `%LOCALAPPDATA%\IntraFlow\migration-runtime`에 안전하게 풀리며, 실제 DB와 설정 역시 배포 폴더 밖의 로컬 앱 데이터 경로에 유지됩니다.
 

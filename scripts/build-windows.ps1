@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet("Standalone", "OneFile")]
     [string]$Mode = "Standalone",
@@ -8,11 +8,27 @@ param(
     [switch]$Clean,
     [switch]$SkipTests,
     [switch]$SkipInstall,
-    [switch]$AllowCompilerDownload
+    [switch]$AllowCompilerDownload,
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[Console]::InputEncoding = $Utf8NoBom
+[Console]::OutputEncoding = $Utf8NoBom
+$OutputEncoding = $Utf8NoBom
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+
+if ($Help) {
+    Write-Host "IntraFlow Windows 빌드"
+    Write-Host "  최초 빌드: .\scripts\build-windows.cmd -Clean"
+    Write-Host "  단일 EXE:  .\scripts\build-windows.cmd -Mode OneFile -Clean"
+    Write-Host "  재빌드:    .\scripts\build-windows.cmd -Mode OneFile -Clean -SkipInstall"
+    exit 0
+}
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BuildVenv = Join-Path $ProjectRoot ".build-venv"
