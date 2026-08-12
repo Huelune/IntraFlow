@@ -124,6 +124,7 @@ QDialog QPushButton[primary="true"] {{ min-height: 36px; }}
 QToolButton {{ min-width: 28px; min-height: 28px; max-width: 28px; max-height: 28px;
     border-radius: 5px; border: 1px solid {t.input_border}; background: {t.surface}; color: {t.text}; }}
 QToolButton[wide="true"] {{ max-width: 16777215px; padding: 0 8px; }}
+QToolButton:pressed, QToolButton:checked {{ border-color: {t.accent}; background: {t.selection}; }}
 QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QDateEdit, QDoubleSpinBox, QSpinBox {{
     min-height: 30px; border: 1px solid {t.input_border}; border-radius: 5px;
     background: {t.surface}; color: {t.text}; padding: 1px 6px; selection-background-color: {t.accent}; }}
@@ -138,19 +139,19 @@ QTableWidget, QTreeWidget, QListWidget, QCalendarWidget QAbstractItemView {{
 QHeaderView::section {{ background: {t.elevated}; color: {t.text}; border: none; border-bottom: 1px solid {t.border};
     padding: 7px 6px; font-weight: 700; }}
 QTableWidget::item {{ padding: 4px; }}
-QTableWidget::item:selected, QTreeWidget::item:selected {{ border-left: 3px solid {t.accent}; }}
+QTableWidget::item:selected, QTreeWidget::item:selected {{ background: {t.selection}; color: {t.text}; }}
 QTabWidget::pane {{ border: 0; top: -1px; }}
 QTabBar::tab {{ padding: 9px 16px; color: {t.muted}; border-bottom: 3px solid transparent; }}
 QTabBar::tab:selected {{ color: {t.text}; border-bottom: 3px solid {t.accent}; font-weight: 700; }}
 QProgressBar {{ border: 0; border-radius: 5px; background: {t.elevated}; color: {t.text}; text-align: center; min-height: 18px; }}
 QProgressBar::chunk {{ border-radius: 5px; background: {t.accent}; }}
+QWidget[progressCell="true"] {{ background: transparent; }}
+QWidget[progressCell="true"] QProgressBar {{ min-height: 16px; max-height: 16px; }}
 QScrollArea {{ border: 0; background: transparent; }}
 QScrollBar:vertical {{ background: {t.background}; width: 12px; margin: 0; }}
 QScrollBar:horizontal {{ background: {t.background}; height: 12px; margin: 0; }}
 QScrollBar::handle {{ background: {t.input_border}; border-radius: 5px; min-height: 24px; min-width: 24px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
-QCalendarWidget QWidget {{ alternate-background-color: {t.elevated}; }}
-QCalendarWidget QToolButton {{ max-width: 16777215px; padding: 0 6px; }}
 QCheckBox {{ spacing: 6px; color: {t.text}; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid {t.input_border}; border-radius: 3px; background: {t.surface}; }}
 QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; }}

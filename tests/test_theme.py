@@ -34,3 +34,5 @@ def test_theme_manager_applies_complete_dark_palette() -> None:
     assert app.palette().color(QPalette.ColorRole.Base).name().upper() == DARK.surface
     assert app.palette().color(QPalette.ColorRole.Text).name().upper() == DARK.text
     assert DARK.accent in app.styleSheet()
+    assert "border-left: 3px" not in app.styleSheet()
+    assert "QCalendarWidget QToolButton" not in app.styleSheet()

@@ -13,6 +13,7 @@ from intraflow.services.administration_service import AdministrationService
 from intraflow.services.progress_service import ProgressService
 from intraflow.services.work_service import WorkService
 from intraflow.ui.dialogs import DeviceDialog, PartDialog, ProjectDialog, UnitDialog, UserDialog
+from intraflow.ui.table_view import configure_columns
 
 
 class AdministrationWidget(QWidget):
@@ -41,12 +42,15 @@ class AdministrationWidget(QWidget):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["프로젝트 / 파트 / 사용자 업무", "소유자", "상태", "기간", "진행률"])
         self.tree.setAlternatingRowColors(True)
+        configure_columns(self.tree, "admin-project-hierarchy", (300, 110, 90, 190, 110))
         self.tree.itemSelectionChanged.connect(self._load_hierarchy_detail)
         self.hierarchy_detail = _ReadOnlyDetail()
         self.hierarchy_history = QTableWidget(0, 6)
         self.hierarchy_history.setHorizontalHeaderLabels(["시각", "이전량", "증감량", "현재량", "진행률", "메모"])
         self.hierarchy_history.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.hierarchy_history.horizontalHeader().setStretchLastSection(True)
+        configure_columns(
+            self.hierarchy_history, "admin-public-history", (160, 75, 75, 75, 85, 240),
+        )
         self.new_project_button, self.new_part_button = QPushButton("새 프로젝트"), QPushButton("새 파트")
         self.new_project_button.setProperty("primary", True)
         self.edit_button, refresh = QPushButton("수정"), QPushButton("새로고침")
@@ -79,6 +83,7 @@ class AdministrationWidget(QWidget):
         self.user_tree = QTreeWidget()
         self.user_tree.setHeaderLabels(["사용자 / 기기", "유형", "상태"])
         self.user_tree.setAlternatingRowColors(True)
+        configure_columns(self.user_tree, "admin-users-devices", (240, 120, 100))
         self.user_tree.itemSelectionChanged.connect(self._load_user_detail)
         self.user_detail = _ReadOnlyDetail()
         add_user, add_device, edit, refresh = (
@@ -114,6 +119,7 @@ class AdministrationWidget(QWidget):
         self.unit_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.unit_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.unit_table.setAlternatingRowColors(True)
+        configure_columns(self.unit_table, "admin-units", (110, 200, 90, 110))
         self.unit_table.itemSelectionChanged.connect(self._load_unit_detail)
         self.unit_detail = _ReadOnlyDetail()
         add, edit, refresh = QPushButton("새 단위"), QPushButton("수정"), QPushButton("새로고침")

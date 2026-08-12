@@ -18,6 +18,7 @@ from intraflow.services.team_view_service import (
 )
 from intraflow.services.work_service import WorkItemView, WorkService
 from intraflow.ui.dialogs import WorkItemDialog
+from intraflow.ui.table_view import configure_columns
 
 
 def date_edit() -> QDateEdit:
@@ -77,9 +78,9 @@ class WorkDetailPanel(QWidget):
         summary.setColumnStretch(3, 1)
         self.history = QTableWidget(0, 6)
         self.history.setHorizontalHeaderLabels(["시각", "이전량", "증감량", "현재량", "진행률", "메모"])
-        self.history.horizontalHeader().setStretchLastSection(True)
         self.history.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.history.setAlternatingRowColors(True)
+        configure_columns(self.history, "work-detail-history", (160, 75, 75, 75, 85, 240))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(7)
@@ -244,7 +245,9 @@ class MyWorkWidget(QWidget):
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        configure_columns(
+            self.table, "my-work-list", (180, 150, 140, 85, 80, 80, 110, 190, 240),
+        )
         self.table.itemSelectionChanged.connect(self._load_selection)
         self.detail = WorkDetailPanel(owner_mode=True)
         self.detail.refresh_button.clicked.connect(self.manual_refresh)
@@ -445,7 +448,7 @@ class AggregateDetailPanel(QWidget):
         self.children = QTableWidget(0, 4)
         self.children.setHorizontalHeaderLabels(["하위 항목", "진행률", "업무 수", "경고"])
         self.children.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.children.horizontalHeader().setStretchLastSection(True)
+        configure_columns(self.children, "team-aggregate-children", (220, 110, 80, 80))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.addWidget(self.title)
@@ -540,7 +543,9 @@ class TeamWorkWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        configure_columns(
+            self.table, "team-work-list", (110, 150, 130, 190, 190, 80, 80, 110, 240),
+        )
         self.table.itemSelectionChanged.connect(self._load_list_selection)
         page = QWidget()
         page.setProperty("card", True)
@@ -560,7 +565,7 @@ class TeamWorkWidget(QWidget):
         self.agenda.setHorizontalHeaderLabels(["구분", "소유자", "업무", "기간", "상태", "진행률"])
         self.agenda.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.agenda.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.agenda.horizontalHeader().setStretchLastSection(True)
+        configure_columns(self.agenda, "team-calendar-agenda", (75, 110, 260, 190, 90, 110))
         self.agenda.itemSelectionChanged.connect(self._load_agenda_selection)
         page = QWidget()
         page.setProperty("card", True)
@@ -591,6 +596,10 @@ class TeamWorkWidget(QWidget):
         self.overview_tree.setHeaderLabels(
             ["프로젝트 / 파트 / 업무", "진행률", "전체", "완료", "진행 중", "미시작", "경고", "상태", "마지막 갱신"])
         self.overview_tree.setAlternatingRowColors(True)
+        configure_columns(
+            self.overview_tree, "team-progress-overview",
+            (280, 110, 60, 60, 75, 75, 60, 90, 170),
+        )
         self.overview_tree.itemSelectionChanged.connect(self._load_overview_selection)
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -734,10 +743,9 @@ class TeamWorkWidget(QWidget):
             parent.addChild(item)
         self._overview_items[(node.node_type, node.id)] = item
         if node.progress_ratio is not None:
-            bar = QProgressBar()
-            bar.setRange(0, 100)
-            bar.setValue(round(node.progress_ratio * 100))
-            self.overview_tree.setItemWidget(item, 1, bar)
+            self.overview_tree.setItemWidget(
+                item, 1, _progress_cell(round(node.progress_ratio * 100)),
+            )
         for child in node.children:
             self._add_progress_node(item, child, f"{path} / {child.label}")
         return item
@@ -836,16 +844,32 @@ def _set_work_row(
 ) -> None:
     for column, value in enumerate(values):
         if column == progress_column:
-            bar = QProgressBar()
-            bar.setRange(0, 100)
-            bar.setValue(round(item.progress_ratio * 100))
-            table.setCellWidget(row, column, bar)
+            table.setCellWidget(row, column, _progress_cell(round(item.progress_ratio * 100)))
             continue
         cell = QTableWidgetItem(value)
         if column == id_column:
             cell.setData(Qt.ItemDataRole.UserRole, item.work_item_id)
             cell.setData(Qt.ItemDataRole.UserRole + 1, item.assignment_id)
         table.setItem(row, column, cell)
+
+
+class ProgressCell(QWidget):
+    def __init__(self, value: int) -> None:
+        super().__init__()
+        self.setProperty("progressCell", True)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setValue(value)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 3, 6, 3)
+        layout.addWidget(self.bar)
+
+    def value(self) -> int:
+        return self.bar.value()
+
+
+def _progress_cell(value: int) -> ProgressCell:
+    return ProgressCell(value)
 
 
 def _quantity(maximum: float, default: float, *, minimum: float = 0) -> QDoubleSpinBox:

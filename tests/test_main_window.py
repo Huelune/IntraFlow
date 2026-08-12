@@ -4,11 +4,12 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QApplication, QProgressBar, QScrollArea, QToolButton
+from PySide6.QtWidgets import QApplication, QScrollArea, QToolButton
 from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.services.progress_service import ProgressService
 from intraflow.ui.main_window import MainWindow
+from intraflow.ui.work_widgets import ProgressCell
 from workflow import build_workflow
 
 
@@ -44,7 +45,8 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     assert window.settings_widget.enabled.isChecked() is True
     assert window.settings_widget.interval.currentData() == 30
     assert window.my_work.table.rowCount() == 1
-    assert isinstance(window.my_work.table.cellWidget(0, 6), QProgressBar)
+    assert isinstance(window.my_work.table.cellWidget(0, 6), ProgressCell)
+    assert window.my_work.table.columnWidth(6) >= 110
     progress.add_delta(item.assignment_id, 5, "진행")
     window.refresh_all()
     app.processEvents()
@@ -64,7 +66,7 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     assert window.team_work.left_stack.currentIndex() == 2
     assert window.team_work.overview_tree.topLevelItemCount() == 1
     project_node = window.team_work.overview_tree.topLevelItem(0)
-    assert isinstance(window.team_work.overview_tree.itemWidget(project_node, 1), QProgressBar)
+    assert isinstance(window.team_work.overview_tree.itemWidget(project_node, 1), ProgressCell)
     window.team_work.overview_tree.setCurrentItem(project_node)
     assert window.team_work.detail_stack.currentIndex() == 1
     assert window.team_work.aggregate_detail.title.text() == "프로젝트"
