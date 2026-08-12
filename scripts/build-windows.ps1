@@ -33,6 +33,7 @@ if ($Help) {
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BuildVenv = Join-Path $ProjectRoot ".build-venv"
 $BuildRoot = Join-Path $ProjectRoot "build\windows"
+$PytestTemp = Join-Path $ProjectRoot "build\pytest-temp"
 $ReleaseRoot = Join-Path $ProjectRoot "release"
 $EntryPoint = Join-Path $ProjectRoot "src\intraflow\main.py"
 $Python = Join-Path $BuildVenv "Scripts\python.exe"
@@ -106,7 +107,10 @@ if (-not $SkipInstall) {
 }
 
 if (-not $SkipTests) {
-    Invoke-Checked $Python "-m" "pytest" "-q" (Join-Path $ProjectRoot "tests")
+    Remove-BuildPath $PytestTemp
+    New-Item -ItemType Directory -Path (Split-Path -Parent $PytestTemp) -Force | Out-Null
+    New-Item -ItemType Directory -Path $PytestTemp -Force | Out-Null
+    Invoke-Checked $Python "-m" "pytest" "-q" "--basetemp=$PytestTemp" (Join-Path $ProjectRoot "tests")
 }
 
 Remove-BuildPath $BuildRoot

@@ -85,6 +85,8 @@ Windows의 라이트·다크 모드를 자동으로 감지해 앱 전체 Palette
 
 CMD 래퍼는 코드 페이지와 PowerShell·Python 출력을 UTF-8로 맞춥니다. 그래도 한글이 네모나 물음표로 보이면 Windows Terminal을 사용하고 프로필 글꼴을 `Cascadia Mono`, `맑은 고딕` 또는 다른 한글 지원 글꼴로 변경하세요.
 
+빌드 중 pytest는 Windows 공용 임시 폴더를 사용하지 않고 프로젝트의 `build/pytest-temp`를 사용합니다. 이전 관리자 실행이나 다른 계정이 만든 `%TEMP%/pytest-of-*` 폴더의 권한과 관계없이 일반 사용자로 테스트할 수 있습니다.
+
 완성된 폴더와 ZIP은 `release/`에 생성됩니다. 두 번째 빌드부터 패키지 설치를 생략하려면 다음처럼 실행합니다.
 
 ```powershell
