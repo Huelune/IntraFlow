@@ -15,7 +15,7 @@ def _entry(index: int, *, end_date: str = "2026-08-12") -> TeamCalendarEntry:
         work_item_id=f"work-{index}", assignment_id=f"assignment-{index}",
         owner_name="담당자", project_name="긴 프로젝트", part_name="긴 파트",
         work_name=f"업무 {index}", start_date="2026-08-10", end_date=end_date,
-        source="PLANNED" if index % 2 else "ACTUAL", progress_ratio=0.25,
+        progress_ratio=0.25,
         progress_state="IN_PROGRESS", effective_active=True, date_warning=False,
     )
 

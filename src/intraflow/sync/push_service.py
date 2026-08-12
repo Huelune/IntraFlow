@@ -10,6 +10,7 @@ from intraflow.services.errors import (
 )
 from intraflow.sync.lock_manager import LockManager
 from intraflow.sync.nas_client import NasClient
+from intraflow.sync.results import SyncTargetResult
 from intraflow.sync.snapshot_builder import SnapshotBuilder
 from intraflow.timeutil import utc_now_iso
 
@@ -76,7 +77,7 @@ class PushService:
             snapshot = SnapshotBuilder(session).units()
         return self._push_global("UNITS", snapshot, "units.json")
 
-    def push_pending(self, *, current_user_id: str) -> int:
+    def push_pending(self, *, current_user_id: str) -> tuple[SyncTargetResult, ...]:
         if current_user_id != self.current_user_id:
             raise PermissionDeniedError("현재 사용자와 동기화 사용자가 일치하지 않습니다.")
         with self.session_factory() as session:
@@ -86,7 +87,7 @@ class PushService:
             editable_projects = set(session.scalars(
                 session.query(ProjectEditor.project_id).filter_by(user_id=current_user_id).statement
             ))
-        completed = 0
+        results: list[SyncTargetResult] = []
         for target in targets:
             try:
                 if target.target_type == "USER_PUBLIC" and target.target_id == current_user_id:
@@ -99,10 +100,25 @@ class PushService:
                     self.push_project(target.target_id)
                 else:
                     raise PermissionDeniedError("해당 동기화 대상을 업로드할 권한이 없습니다.")
-                completed += 1
+                results.append(SyncTargetResult(
+                    target.target_type, target.target_id, "APPLIED", "NAS에 반영했습니다.",
+                ))
+            except RevisionConflictError as exc:
+                self._record_failure(target.id, str(exc))
+                results.append(SyncTargetResult(
+                    target.target_type, target.target_id, "CONFLICT", str(exc),
+                ))
             except SyncError as exc:
                 self._record_failure(target.id, str(exc))
-        return completed
+                results.append(SyncTargetResult(
+                    target.target_type, target.target_id, "FAILED", str(exc),
+                ))
+            except Exception as exc:
+                self._record_failure(target.id, str(exc))
+                results.append(SyncTargetResult(
+                    target.target_type, target.target_id, "FAILED", str(exc),
+                ))
+        return tuple(results)
 
     def _push_global(self, source_type: str, snapshot, filename: str) -> int:
         with self.session_factory() as session:
@@ -136,6 +152,8 @@ class PushService:
             state.remote_revision = revision
             state.last_sync_at = utc_now_iso()
             state.last_hash = _snapshot_hash(payload)
+            import json
+            state.base_snapshot_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
             if clear_outbox:
                 outbox = session.query(SyncOutbox).filter_by(target_type=source_type, target_id=source_id).one_or_none()
                 if outbox is not None:

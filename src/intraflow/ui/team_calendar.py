@@ -66,14 +66,14 @@ class _DayCell(QFrame):
             button = QToolButton()
             button.setProperty("calendarEntry", True)
             button.setProperty("wide", True)
-            button.setProperty("calendarSource", entry.source.lower())
             button.setProperty("deadline", date.toString("yyyy-MM-dd") == entry.end_date)
+            button.setProperty("progressState", entry.progress_state.lower())
+            button.setProperty("warning", entry.date_warning)
             suffix = QDate.fromString(entry.end_date, "yyyy-MM-dd").toString("M/d")
             prefix = "마감 · " if button.property("deadline") else ""
             button.setText(f"{prefix}{entry.work_name} · ~{suffix}")
-            source = {"ACTUAL": "개인 일정", "PLANNED": "계획 일정", "BOTH": "개인·계획 일정"}[entry.source]
             button.setToolTip(
-                f"{entry.owner_name}\n{entry.path}\n{source}: "
+                f"{entry.owner_name}\n{entry.path}\n계획 기간: "
                 f"{entry.start_date} ~ {entry.end_date}\n진행률 {entry.progress_ratio:.0%}"
             )
             button.clicked.connect(

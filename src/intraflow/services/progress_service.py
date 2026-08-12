@@ -147,11 +147,6 @@ class ProgressService:
     def set_note(self, assignment_id: str, note: str | None) -> ProgressUpdateResult:
         return self._update_metadata(assignment_id, note=note, update_note=True)
 
-    def set_schedule(self, assignment_id: str, start: str, end: str) -> ProgressUpdateResult:
-        if not start or not end or end < start:
-            raise ValidationError("올바른 시작일과 종료일을 선택하세요.")
-        return self._update_metadata(assignment_id, schedule=(start, end))
-
     def list_history(self, assignment_id: str) -> list[ProgressHistory]:
         with self.session_factory() as session:
             assignment = session.get(Assignment, assignment_id)
@@ -183,14 +178,13 @@ class ProgressService:
 
     def _update_metadata(
         self, assignment_id: str, *, note: str | None = None, update_note: bool = False,
-        schedule: tuple[str, str] | None = None,
     ) -> ProgressUpdateResult:
         now = utc_now_iso()
         with self.session_factory.begin() as session:
             assignment = session.get(Assignment, assignment_id)
             if assignment is None or assignment.is_deleted:
                 raise NotFoundError("업무 진행 정보를 찾을 수 없습니다.")
-            item = self._validate_owned_active_assignment(session, assignment)
+            self._validate_owned_active_assignment(session, assignment)
             progress = session.get(AssignmentProgress, assignment_id)
             if progress is None:
                 progress = AssignmentProgress(
@@ -198,11 +192,6 @@ class ProgressService:
                     completed_quantity=0, revision=1, updated_at=now, device_id=self.current_device_id,
                 )
                 session.add(progress)
-            if schedule is not None:
-                start, end = schedule
-                if (item.planned_start and start < item.planned_start) or (item.planned_end and end > item.planned_end):
-                    raise ValidationError("개인 일정은 업무 계획 기간 안에 있어야 합니다.")
-                progress.schedule_start, progress.schedule_end = start, end
             if update_note:
                 progress.note = (note or "").strip() or None
                 current = float(progress.completed_quantity)

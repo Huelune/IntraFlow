@@ -9,7 +9,6 @@ from intraflow.models import (
     AppMeta,
     Assignment,
     AssignmentProgress,
-    CalendarEvent,
     Part,
     ProgressHistory,
     Project,
@@ -22,7 +21,6 @@ from intraflow.services.errors import NotFoundError
 from intraflow.sync.schemas import (
     AssignmentData,
     AssignmentProgressData,
-    CalendarEventData,
     PartData,
     ProgressHistoryData,
     ProjectData,
@@ -138,9 +136,6 @@ class SnapshotBuilder:
             .where(ProgressHistory.user_id == user_id, ProgressHistory.created_at >= cutoff)
             .order_by(ProgressHistory.created_at)
         ))
-        calendar = list(self.session.scalars(
-            select(CalendarEvent).where(CalendarEvent.user_id == user_id, CalendarEvent.visibility == "TEAM")
-        ))
         return UserPublicSnapshot(
             revision=max(_revision([value.revision for value in progress]), len(work_items) + len(histories)),
             generated_at=utc_now_iso(),
@@ -158,8 +153,8 @@ class SnapshotBuilder:
                 is_deleted=bool(item.is_deleted), created_at=item.created_at, updated_at=item.updated_at,
             ) for item in assignments],
             progress=[AssignmentProgressData(
-                assignment_id=item.assignment_id, user_id=item.user_id, schedule_start=item.schedule_start,
-                schedule_end=item.schedule_end, completed_quantity=item.completed_quantity, note=item.note,
+                assignment_id=item.assignment_id, user_id=item.user_id,
+                completed_quantity=item.completed_quantity, note=item.note,
                 revision=item.revision, updated_at=item.updated_at, device_id=item.device_id,
             ) for item in progress],
             progress_history=[ProgressHistoryData(
@@ -168,10 +163,4 @@ class SnapshotBuilder:
                 current_quantity=item.current_quantity, note=item.note, created_at=item.created_at,
                 device_id=item.device_id,
             ) for item in histories],
-            team_calendar_events=[CalendarEventData(
-                id=item.id, user_id=item.user_id, title=item.title, event_type=item.event_type,
-                start_at=item.start_at, end_at=item.end_at, visibility="TEAM", memo=item.memo,
-                revision=item.revision, is_deleted=bool(item.is_deleted), created_at=item.created_at,
-                updated_at=item.updated_at,
-            ) for item in calendar],
         )

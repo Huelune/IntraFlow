@@ -178,10 +178,6 @@ class AssignmentProgress(Base):
     __tablename__ = "assignment_progress"
     __table_args__ = (
         CheckConstraint("completed_quantity >= 0", name="assignment_progress_completed_quantity"),
-        CheckConstraint(
-            "schedule_end IS NULL OR schedule_start IS NULL OR schedule_end >= schedule_start",
-            name="assignment_progress_period",
-        ),
         Index("idx_assignment_progress_user", "user_id"),
     )
 
@@ -189,8 +185,6 @@ class AssignmentProgress(Base):
         ForeignKey("assignments.id", ondelete="RESTRICT"), primary_key=True
     )
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    schedule_start: Mapped[Optional[str]] = mapped_column(String)
-    schedule_end: Mapped[Optional[str]] = mapped_column(String)
     completed_quantity: Mapped[float] = mapped_column(default=0, nullable=False)
     note: Mapped[Optional[str]] = mapped_column(String)
     revision: Mapped[int] = mapped_column(default=1, nullable=False)
@@ -219,49 +213,6 @@ class ProgressHistory(Base):
     device_id: Mapped[Optional[str]] = mapped_column(ForeignKey("devices.id", ondelete="RESTRICT"))
 
 
-class CalendarEvent(Base):
-    __tablename__ = "calendar_events"
-    __table_args__ = (
-        CheckConstraint("event_type IN ('MEETING', 'ABSENCE', 'OTHER')", name="calendar_events_type"),
-        CheckConstraint("visibility IN ('PRIVATE', 'TEAM')", name="calendar_events_visibility"),
-        CheckConstraint(BOOL_CHECK.format("is_deleted"), name="calendar_events_deleted_bool"),
-        CheckConstraint("end_at IS NULL OR end_at >= start_at", name="calendar_events_period"),
-        Index("idx_calendar_user_period", "user_id", "start_at", "end_at"),
-        Index("idx_calendar_visibility_start", "visibility", "start_at"),
-    )
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    event_type: Mapped[str] = mapped_column(String, nullable=False)
-    start_at: Mapped[str] = mapped_column(String, nullable=False)
-    end_at: Mapped[Optional[str]] = mapped_column(String)
-    visibility: Mapped[str] = mapped_column(String, nullable=False)
-    memo: Mapped[Optional[str]] = mapped_column(String)
-    revision: Mapped[int] = mapped_column(default=1, nullable=False)
-    is_deleted: Mapped[int] = mapped_column(default=0, nullable=False)
-    created_at: Mapped[str] = mapped_column(String, nullable=False)
-    updated_at: Mapped[str] = mapped_column(String, nullable=False)
-
-
-class PersonalNote(Base):
-    __tablename__ = "personal_notes"
-    __table_args__ = (
-        CheckConstraint(BOOL_CHECK.format("is_pinned"), name="personal_notes_pinned_bool"),
-        CheckConstraint(BOOL_CHECK.format("is_deleted"), name="personal_notes_deleted_bool"),
-        Index("idx_personal_notes_user_pin", "user_id", "is_pinned", "updated_at"),
-    )
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    content: Mapped[Optional[str]] = mapped_column(String)
-    is_pinned: Mapped[int] = mapped_column(default=0, nullable=False)
-    created_at: Mapped[str] = mapped_column(String, nullable=False)
-    updated_at: Mapped[str] = mapped_column(String, nullable=False)
-    is_deleted: Mapped[int] = mapped_column(default=0, nullable=False)
-
-
 class AppMeta(Base):
     __tablename__ = "app_meta"
 
@@ -280,6 +231,7 @@ class SyncState(Base):
     remote_revision: Mapped[int] = mapped_column(default=0, nullable=False)
     last_sync_at: Mapped[Optional[str]] = mapped_column(String)
     last_hash: Mapped[Optional[str]] = mapped_column(String)
+    base_snapshot_json: Mapped[Optional[str]] = mapped_column(String)
 
 
 class SyncOutbox(Base):

@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.models import (
-    Assignment, AssignmentProgress, CalendarEvent, Device, Part, PersonalNote,
+    Assignment, AssignmentProgress, Device, Part,
     ProgressHistory, Project, ProjectEditor, SyncOutbox, SyncState, Unit, User, WorkItem,
 )
 
@@ -29,7 +29,7 @@ def reset_local_data(session_factory: sessionmaker[Session]) -> ResetResult:
         deleted = 0
         for model in (
             ProgressHistory, AssignmentProgress, Assignment, WorkItem, Part,
-            ProjectEditor, Project, PersonalNote, CalendarEvent,
+            ProjectEditor, Project,
         ):
             result = session.execute(delete(model))
             deleted += result.rowcount or 0
@@ -41,7 +41,7 @@ def reset_local_data(session_factory: sessionmaker[Session]) -> ResetResult:
         )).rowcount or 0
         for model in (
             ProgressHistory, AssignmentProgress, Assignment, WorkItem, Part,
-            ProjectEditor, Project, PersonalNote, CalendarEvent,
+            ProjectEditor, Project,
         ):
             remaining = session.scalar(select(func.count()).select_from(model)) or 0
             if remaining:

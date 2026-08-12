@@ -8,37 +8,30 @@ from intraflow.services.team_view_service import TeamViewFilters, TeamViewServic
 from workflow import build_workflow
 
 
-def test_calendar_always_returns_actual_and_planned_schedules(
+def test_calendar_uses_work_planned_schedule(
     session_factory: sessionmaker[Session],
 ) -> None:
     identity, _admin, _work, _project, _part, item = build_workflow(session_factory)
-    ProgressService(
-        session_factory, current_user_id=identity.user_id, current_device_id=identity.device_id,
-    ).set_schedule(item.assignment_id, "2026-08-03", "2026-08-10")
     service = TeamViewService(session_factory, current_user_id=identity.user_id)
 
     combined = service.list_calendar_entries(
         "2026-08-05", "2026-08-05")
 
-    assert {x.source for x in combined} == {"ACTUAL", "PLANNED"}
+    assert len(combined) == 1
+    assert (combined[0].start_date, combined[0].end_date) == (item.planned_start, item.planned_end)
     assert service.list_calendar_entries(
         "2026-07-01", "2026-07-01") == []
 
 
-def test_calendar_combines_matching_actual_and_planned_schedule(
+def test_calendar_returns_one_entry_per_work_item(
     session_factory: sessionmaker[Session],
 ) -> None:
     identity, _admin, _work, _project, _part, item = build_workflow(session_factory)
-    ProgressService(
-        session_factory, current_user_id=identity.user_id, current_device_id=identity.device_id,
-    ).set_schedule(item.assignment_id, item.planned_start, item.planned_end)
-
     entries = TeamViewService(
         session_factory, current_user_id=identity.user_id,
     ).list_calendar_entries(item.planned_start, item.planned_end)
 
     assert len(entries) == 1
-    assert entries[0].source == "BOTH"
 
 
 def test_progress_overview_normalizes_work_and_part_weights(

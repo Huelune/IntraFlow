@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -79,6 +80,8 @@ class AdministrationService:
                     )) or 0
                     if active_admins <= 1:
                         raise ValidationError("마지막 활성 시스템 관리자의 권한을 해제할 수 없습니다.")
+                if user.is_active and not is_active:
+                    self._validate_editor_deactivation(session, user.id)
                 user.user_code, user.display_name = user_code, display_name
                 user.is_system_admin, user.is_active = int(is_system_admin), int(is_active)
                 user.revision += 1
@@ -95,6 +98,8 @@ class AdministrationService:
                 raise NotFoundError("사용자를 찾을 수 없습니다.")
             if user.id == self.current_user_id and not active:
                 raise ValidationError("현재 사용자는 비활성화할 수 없습니다.")
+            if user.is_active and not active:
+                self._validate_editor_deactivation(session, user.id)
             user.is_active, user.revision, user.updated_at = int(active), user.revision + 1, utc_now_iso()
             self._mark_dirty(session, "USERS", "global")
 
@@ -192,7 +197,8 @@ class AdministrationService:
 
     def create_project(self, name: str, planned_start: str | None = None, planned_end: str | None = None,
                        description: str | None = None, *, is_active: bool = True,
-                       editor_user_id: str | None = None) -> str:
+                       editor_user_id: str | None = None,
+                       editor_user_ids: Iterable[str] | None = None) -> str:
         self._validate_period(name, planned_start, planned_end, "프로젝트")
         project_id, now = str(uuid4()), utc_now_iso()
         with self.session_factory.begin() as session:
@@ -201,18 +207,19 @@ class AdministrationService:
                                 planned_start=planned_start, planned_end=planned_end,
                                 status="ACTIVE" if is_active else "INACTIVE", revision=1,
                                 is_deleted=0, created_at=now, updated_at=now, updated_by=self.current_user_id))
-            session.add(ProjectEditor(project_id=project_id, user_id=self.current_user_id))
-            if editor_user_id and editor_user_id != self.current_user_id:
-                editor = session.get(User, editor_user_id)
-                if editor is None or not editor.is_active:
-                    raise ValidationError("활성 사용자만 프로젝트 편집자로 지정할 수 있습니다.")
-                session.add(ProjectEditor(project_id=project_id, user_id=editor_user_id))
+            editors = set(editor_user_ids) if editor_user_ids is not None else {self.current_user_id}
+            if editor_user_id:
+                editors.add(editor_user_id)
+            self._validate_editor_users(session, editors, require_nonempty=is_active)
+            for user_id in sorted(editors):
+                session.add(ProjectEditor(project_id=project_id, user_id=user_id))
             self._mark_dirty(session, "PROJECT", project_id)
         return project_id
 
     def update_project(self, project_id: str, name: str, planned_start: str | None, planned_end: str | None,
                        description: str | None = None, *, allow_child_conflicts: bool = False,
-                       is_active: bool | None = None, editor_user_id: str | None = None) -> None:
+                       is_active: bool | None = None, editor_user_id: str | None = None,
+                       editor_user_ids: Iterable[str] | None = None) -> None:
         self._validate_period(name, planned_start, planned_end, "프로젝트")
         with self.session_factory.begin() as session:
             self._require_project_manager(session, project_id)
@@ -232,11 +239,17 @@ class AdministrationService:
             project.planned_start, project.planned_end = planned_start, planned_end
             if is_active is not None:
                 project.status = "ACTIVE" if is_active else "INACTIVE"
-            if editor_user_id and session.get(ProjectEditor, (project_id, editor_user_id)) is None:
-                editor = session.get(User, editor_user_id)
-                if editor is None or not editor.is_active:
-                    raise ValidationError("활성 사용자만 프로젝트 편집자로 지정할 수 있습니다.")
-                session.add(ProjectEditor(project_id=project_id, user_id=editor_user_id))
+            requested_editors = set(editor_user_ids) if editor_user_ids is not None else None
+            if editor_user_id:
+                requested_editors = requested_editors or {
+                    value.user_id for value in session.scalars(
+                        select(ProjectEditor).where(ProjectEditor.project_id == project_id)
+                    )
+                }
+                requested_editors.add(editor_user_id)
+            if requested_editors is not None:
+                self._require_admin(session)
+                self._replace_project_editors(session, project_id, requested_editors)
             self._touch_project(session, project_id)
 
     def set_project_active(self, project_id: str, active: bool) -> None:
@@ -245,20 +258,39 @@ class AdministrationService:
             project = session.get(Project, project_id)
             if project is None or project.is_deleted:
                 raise NotFoundError("프로젝트를 찾을 수 없습니다.")
+            if active:
+                editors = {value.user_id for value in session.scalars(
+                    select(ProjectEditor).where(ProjectEditor.project_id == project_id)
+                )}
+                self._validate_editor_users(session, editors)
             project.status = "ACTIVE" if active else "INACTIVE"
             self._touch_project(session, project_id)
 
     def add_project_editor(self, project_id: str, user_id: str) -> None:
-        try:
-            with self.session_factory.begin() as session:
-                self._require_project_manager(session, project_id)
-                user = session.get(User, user_id)
-                if user is None or not user.is_active:
-                    raise ValidationError("활성 사용자만 프로젝트 편집자로 지정할 수 있습니다.")
-                session.add(ProjectEditor(project_id=project_id, user_id=user_id))
-                self._touch_project(session, project_id)
-        except IntegrityError as exc:
-            raise ValidationError("이미 프로젝트 편집자로 등록된 사용자입니다.") from exc
+        with self.session_factory() as session:
+            current = {value.user_id for value in session.scalars(
+                select(ProjectEditor).where(ProjectEditor.project_id == project_id)
+            )}
+        if user_id in current:
+            raise ValidationError("이미 프로젝트 편집자로 등록된 사용자입니다.")
+        self.replace_project_editors(project_id, current | {user_id})
+
+    def list_project_editors(self, project_id: str) -> list[User]:
+        with self.session_factory() as session:
+            return list(session.scalars(
+                select(User).join(ProjectEditor, ProjectEditor.user_id == User.id)
+                .where(ProjectEditor.project_id == project_id)
+                .order_by(User.display_name, User.user_code)
+            ))
+
+    def replace_project_editors(self, project_id: str, user_ids: Iterable[str]) -> None:
+        with self.session_factory.begin() as session:
+            self._require_admin(session)
+            project = session.get(Project, project_id)
+            if project is None or project.is_deleted:
+                raise NotFoundError("프로젝트를 찾을 수 없습니다.")
+            self._replace_project_editors(session, project_id, set(user_ids))
+            self._touch_project(session, project_id)
 
     def list_parts(self, project_id: str | None = None) -> list[Part]:
         statement = select(Part).where(Part.is_deleted == 0)
@@ -378,6 +410,47 @@ class AdministrationService:
             raise NotFoundError("프로젝트를 찾을 수 없습니다.")
         project.revision, project.updated_at, project.updated_by = project.revision + 1, utc_now_iso(), self.current_user_id
         self._mark_dirty(session, "PROJECT", project_id)
+
+    @staticmethod
+    def _validate_editor_users(
+        session: Session, user_ids: set[str], *, require_nonempty: bool = True,
+    ) -> None:
+        if not user_ids and require_nonempty:
+            raise ValidationError("프로젝트에는 활성 편집자가 한 명 이상 필요합니다.")
+        if not user_ids:
+            return
+        users = {user.id: user for user in session.scalars(select(User).where(User.id.in_(user_ids)))}
+        if set(users) != user_ids or any(not user.is_active for user in users.values()):
+            raise ValidationError("활성 사용자만 프로젝트 편집자로 지정할 수 있습니다.")
+
+    def _replace_project_editors(self, session: Session, project_id: str, user_ids: set[str]) -> None:
+        project = session.get(Project, project_id)
+        self._validate_editor_users(
+            session, user_ids, require_nonempty=bool(project and project.status == "ACTIVE"),
+        )
+        existing = {value.user_id: value for value in session.scalars(
+            select(ProjectEditor).where(ProjectEditor.project_id == project_id)
+        )}
+        for removed_id in set(existing) - user_ids:
+            session.delete(existing[removed_id])
+        for added_id in user_ids - set(existing):
+            session.add(ProjectEditor(project_id=project_id, user_id=added_id))
+
+    @staticmethod
+    def _validate_editor_deactivation(session: Session, user_id: str) -> None:
+        projects = list(session.scalars(
+            select(Project).join(ProjectEditor, ProjectEditor.project_id == Project.id)
+            .where(ProjectEditor.user_id == user_id, Project.status == "ACTIVE", Project.is_deleted == 0)
+        ))
+        for project in projects:
+            active_editors = session.scalar(
+                select(func.count()).select_from(ProjectEditor).join(User, ProjectEditor.user_id == User.id)
+                .where(ProjectEditor.project_id == project.id, User.is_active == 1, User.id != user_id)
+            ) or 0
+            if active_editors == 0:
+                raise ValidationError(
+                    f"활성 프로젝트 '{project.name}'의 마지막 편집자는 비활성화할 수 없습니다.",
+                )
 
     @staticmethod
     def _increment_meta(session: Session, key: str) -> int:

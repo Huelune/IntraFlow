@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.config import AppSettings, RuntimeConfig
 from intraflow.models import (
-    Assignment, AssignmentProgress, CalendarEvent, Device, Part, ProgressHistory,
+    Assignment, AssignmentProgress, Device, Part, ProgressHistory,
     Project, ProjectEditor, SyncOutbox, SyncState, Unit, User, WorkItem,
 )
 from intraflow.services.errors import SyncError, ValidationError
@@ -119,7 +119,7 @@ class TeamJoinService:
     def _assert_joinable(self) -> None:
         with self.session_factory() as session:
             domain_models = (
-                Project, Part, WorkItem, Assignment, AssignmentProgress, ProgressHistory, CalendarEvent,
+                Project, Part, WorkItem, Assignment, AssignmentProgress, ProgressHistory,
             )
             if any((session.scalar(select(func.count()).select_from(model)) or 0) for model in domain_models):
                 raise ValidationError("로컬 업무 데이터가 있어 기존 팀 합류를 진행할 수 없습니다.")
@@ -142,8 +142,8 @@ class TeamJoinService:
         projects = tuple(self._read_project(nas, value) for value in nas.list_project_ids())
         public = tuple(self._read_public(nas, value) for value in nas.list_user_ids())
         snapshots = (users, *((units_value,) if units_value is not None else ()), *projects, *public)
-        if any(snapshot.schema_version != 2 for snapshot in snapshots):
-            raise ValidationError("기존 팀 합류는 snapshot schema v2만 지원합니다. 첫 번째 PC에서 다시 Push하세요.")
+        if any(snapshot.schema_version not in {2, 3} for snapshot in snapshots):
+            raise ValidationError("기존 팀 합류는 snapshot schema v2와 v3만 지원합니다.")
         self._validate_references(users, units_value, projects, public)
         return _JoinBundle(users, units_value, projects, public)
 
@@ -241,12 +241,6 @@ class TeamJoinService:
             for field, item in data.model_dump().items():
                 if field != "id":
                     setattr(value, field, None if field == "device_id" else item)
-        for data in snapshot.team_calendar_events:
-            value = CalendarEvent(id=data.id)
-            session.add(value)
-            for field, item in data.model_dump().items():
-                if field != "id":
-                    setattr(value, field, int(item) if field == "is_deleted" else item)
 
     @staticmethod
     def _state(session: Session, source_type: str, source_id: str, snapshot) -> None:
@@ -255,6 +249,7 @@ class TeamJoinService:
             source_type=source_type, source_id=source_id, remote_revision=snapshot.revision,
             last_sync_at=utc_now_iso(),
             last_hash=sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            base_snapshot_json=json.dumps(payload, ensure_ascii=False, sort_keys=True),
         ))
 
     @staticmethod
@@ -277,7 +272,7 @@ class LocalJoinRecoveryService:
     def reset_for_join(self, nas_root_path: str | None) -> Path:
         with self.session_factory() as session:
             domain_models = (
-                Project, Part, WorkItem, Assignment, AssignmentProgress, ProgressHistory, CalendarEvent,
+                Project, Part, WorkItem, Assignment, AssignmentProgress, ProgressHistory,
             )
             if any((session.scalar(select(func.count()).select_from(model)) or 0) for model in domain_models):
                 raise ValidationError("로컬 업무 또는 진행 데이터가 있어 자동 초기화할 수 없습니다.")
@@ -305,12 +300,12 @@ class LocalJoinRecoveryService:
             source.backup(destination)
 
         from sqlalchemy import delete
-        from intraflow.models import AppMeta, PersonalNote
+        from intraflow.models import AppMeta
 
         with self.session_factory.begin() as session:
             for model in (
                 ProgressHistory, AssignmentProgress, Assignment, WorkItem, Part, ProjectEditor,
-                Project, PersonalNote, CalendarEvent, Device, SyncOutbox, SyncState, Unit, User, AppMeta,
+                Project, Device, SyncOutbox, SyncState, Unit, User, AppMeta,
             ):
                 session.execute(delete(model))
         self.settings.save_runtime_config(RuntimeConfig(None, None, nas_root_path))

@@ -2,18 +2,24 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
+from intraflow.services.errors import IntraFlowError
+from intraflow.services.workstation_service import WorkstationService
 from intraflow.ui.sync_controller import SyncController
 from intraflow.ui.time_display import TimeDisplay
 
 
 class PersonalSettingsWidget(QWidget):
-    def __init__(self, controller: SyncController, time_display: TimeDisplay | None = None) -> None:
+    def __init__(
+        self, controller: SyncController, time_display: TimeDisplay | None = None,
+        workstation: WorkstationService | None = None,
+    ) -> None:
         super().__init__()
         self.controller = controller
         self.time_display = time_display or TimeDisplay(controller.runtime.display_timezone)
+        self.workstation = workstation
         self._loading = False
         self._dirty = False
         self.enabled = QCheckBox("자동 Pull 사용")
@@ -38,10 +44,13 @@ class PersonalSettingsWidget(QWidget):
             self.nas_path.textInteractionFlags() | Qt.TextInteractionFlag.TextSelectableByMouse)
         self.state, self.last_success, self.error = QLabel(), QLabel(), QLabel()
         self.error.setProperty("status", "error")
-        save, pull_now = QPushButton("설정 저장"), QPushButton("지금 Pull")
+        self.user_code, self.device_id = QLabel(), QLabel()
+        self.device_name = QLineEdit()
+        save, pull_now, save_device = QPushButton("설정 저장"), QPushButton("지금 Pull"), QPushButton("PC 이름 저장")
         save.setProperty("primary", True)
         save.clicked.connect(self.save)
         pull_now.clicked.connect(lambda: controller.pull(automatic=False))
+        save_device.clicked.connect(self.save_device_name)
         self.pull_now = pull_now
         form = QFormLayout()
         form.addRow("자동 Pull", self.enabled)
@@ -52,6 +61,13 @@ class PersonalSettingsWidget(QWidget):
         form.addRow("현재 상태", self.state)
         form.addRow("마지막 성공", self.last_success)
         form.addRow("최근 오류", self.error)
+        workstation_form = QFormLayout()
+        workstation_form.addRow("사용자 코드", self.user_code)
+        workstation_form.addRow("기기 ID", self.device_id)
+        workstation_form.addRow("현재 PC 이름", self.device_name)
+        workstation_actions = QHBoxLayout()
+        workstation_actions.addWidget(save_device)
+        workstation_actions.addStretch()
         actions = QHBoxLayout()
         actions.addWidget(save)
         actions.addWidget(pull_now)
@@ -60,13 +76,18 @@ class PersonalSettingsWidget(QWidget):
         card.setProperty("card", True)
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 20, 20, 20)
-        title = QLabel("개인 동기화 설정")
+        title = QLabel("개인 설정")
         title.setProperty("role", "title")
         description = QLabel("자동 Pull은 이 PC의 로컬 설정이며 Push를 자동 실행하지 않습니다.")
         description.setProperty("role", "muted")
         card_layout.addWidget(title)
         card_layout.addWidget(description)
         card_layout.addSpacing(8)
+        card_layout.addWidget(_section("현재 PC"))
+        card_layout.addLayout(workstation_form)
+        card_layout.addLayout(workstation_actions)
+        card_layout.addSpacing(12)
+        card_layout.addWidget(_section("동기화와 표시"))
         card_layout.addLayout(form)
         card_layout.addLayout(actions)
         card_layout.addStretch()
@@ -77,6 +98,7 @@ class PersonalSettingsWidget(QWidget):
         self.enabled.toggled.connect(self._mark_dirty)
         self.interval.currentIndexChanged.connect(self._mark_dirty)
         self.timezone.currentIndexChanged.connect(self._mark_dirty)
+        self.device_name.textChanged.connect(self._mark_dirty)
         self.refresh()
 
     def save(self) -> None:
@@ -86,8 +108,30 @@ class PersonalSettingsWidget(QWidget):
         self._dirty = False
         self.refresh()
 
+    def save_device_name(self) -> None:
+        if self.workstation is None:
+            return
+        try:
+            self.workstation.update_device_name(self.device_name.text())
+        except IntraFlowError as exc:
+            self.error.setText(str(exc))
+            return
+        self._dirty = False
+        self.refresh()
+
     def refresh(self, *_args, automatic: bool = False) -> None:
         runtime = self.controller.runtime
+        if self.workstation is not None and not self._dirty:
+            try:
+                info = self.workstation.get_current()
+            except IntraFlowError as exc:
+                self.error.setText(str(exc))
+            else:
+                self.user_code.setText(info.user_code)
+                self.device_id.setText(info.device_id)
+                self.device_name.blockSignals(True)
+                self.device_name.setText(info.device_name)
+                self.device_name.blockSignals(False)
         if not self._dirty:
             self._loading = True
             self.enabled.setChecked(runtime.auto_pull_enabled)
@@ -112,3 +156,9 @@ class PersonalSettingsWidget(QWidget):
     def _mark_dirty(self, *_args) -> None:
         if not self._loading:
             self._dirty = True
+
+
+def _section(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setProperty("role", "section")
+    return label

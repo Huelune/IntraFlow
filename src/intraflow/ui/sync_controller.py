@@ -4,9 +4,11 @@ from dataclasses import replace
 from typing import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtWidgets import QApplication
 
 from intraflow.config import AppSettings, RuntimeConfig
 from intraflow.sync.sync_service import SyncService
+from intraflow.sync.results import SyncOperationResult
 from intraflow.timeutil import utc_now_iso
 
 
@@ -54,6 +56,8 @@ class SyncController(QObject):
         self._active_signals: _JobSignals | None = None
         self.last_success_at: str | None = None
         self.last_error: str | None = None
+        self.last_result: SyncOperationResult | None = None
+        self.auto_pull_guard: Callable[[], bool] | None = None
         self.auto_timer = QTimer(self)
         self.auto_timer.setSingleShot(True)
         self.auto_timer.timeout.connect(self._auto_pull)
@@ -79,6 +83,9 @@ class SyncController(QObject):
 
     def pull(self, *, automatic: bool = False) -> bool:
         return self._start("Pull", self.service.pull_all if self.service else None, automatic)
+
+    def set_auto_pull_guard(self, guard: Callable[[], bool]) -> None:
+        self.auto_pull_guard = guard
 
     def push(self) -> bool:
         return self._start("Push", self.service.push_all if self.service else None, False)
@@ -114,14 +121,23 @@ class SyncController(QObject):
     def _auto_pull(self) -> None:
         if not self.runtime.auto_pull_enabled:
             return
+        if QApplication.activeModalWidget() is not None or (
+            self.auto_pull_guard is not None and not self.auto_pull_guard()
+        ):
+            self._schedule_next()
+            return
         if not self.pull(automatic=True):
             self._schedule_next()
 
     def _finish_success(self, name: str, automatic: bool, result: object) -> None:
         self.busy, self.current_operation = False, None
         self._active_signals = None
+        self.last_result = result if isinstance(result, SyncOperationResult) else None
         self.last_success_at = utc_now_iso()
-        self.last_error = None
+        self.last_error = (
+            "일부 동기화 대상에 오류 또는 충돌이 있습니다."
+            if self.last_result is not None and not self.last_result.successful else None
+        )
         self.succeeded.emit(name, automatic, result)
         self.status_changed.emit()
         self._schedule_next()

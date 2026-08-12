@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QDoubleSpinBox, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
     QTextEdit, QVBoxLayout,
 )
 
@@ -161,29 +161,45 @@ class ProjectDialog(_BaseDialog):
         self.end = _date_edit(project.planned_end if project else None)
         self.active = QCheckBox("활성")
         self.active.setChecked(project.status == "ACTIVE" if project else True)
-        self.editor = QComboBox()
-        self.editor.addItem("추가하지 않음", None)
+        self.is_admin, _is_editor = service.current_permissions()
+        self.editors = QListWidget()
+        self.editors.setMinimumHeight(100)
+        selected_editor_ids = {user.id for user in service.list_project_editors(project.id)} if project else {
+            service.current_user_id,
+        }
         for choice in service.choices()["users"]:
-            self.editor.addItem(choice.label, choice.id)
+            entry = QListWidgetItem(choice.label)
+            entry.setData(Qt.ItemDataRole.UserRole, choice.id)
+            entry.setFlags(entry.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            entry.setCheckState(
+                Qt.CheckState.Checked if choice.id in selected_editor_ids else Qt.CheckState.Unchecked,
+            )
+            self.editors.addItem(entry)
+        self.editors.setEnabled(self.is_admin)
         if project:
             self.name.setText(project.name)
             self.description.setPlainText(project.description or "")
         for label, widget in (("이름", self.name), ("설명", self.description), ("시작일", self.start),
-                              ("종료일", self.end), ("상태", self.active), ("편집자 추가", self.editor)):
+                              ("종료일", self.end), ("상태", self.active), ("프로젝트 편집자", self.editors)):
             self.form.addRow(label, widget)
         self.save_button.clicked.connect(self._save)
 
     def _save(self) -> None:
         values = (self.name.text(), self.start.date().toString("yyyy-MM-dd"),
                   self.end.date().toString("yyyy-MM-dd"), self.description.toPlainText())
+        editor_ids = {
+            self.editors.item(index).data(Qt.ItemDataRole.UserRole)
+            for index in range(self.editors.count())
+            if self.editors.item(index).checkState() == Qt.CheckState.Checked
+        } if self.is_admin else None
         if not self.project:
             self._submit(lambda: self.service.create_project(
-                *values, is_active=self.active.isChecked(), editor_user_id=self.editor.currentData()))
+                *values, is_active=self.active.isChecked(), editor_user_ids=editor_ids))
             return
         def save(allow: bool) -> None:
             self.service.update_project(
                 self.project.id, *values, allow_child_conflicts=allow,
-                is_active=self.active.isChecked(), editor_user_id=self.editor.currentData())
+                is_active=self.active.isChecked(), editor_user_ids=editor_ids)
         self._submit(lambda: _save_with_conflict(self, save))
 
 

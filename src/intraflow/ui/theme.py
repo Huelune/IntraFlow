@@ -24,6 +24,7 @@ class ThemeTokens:
     primary_text: str
     selection: str
     warning: str
+    warning_surface: str
     danger: str
     input_border: str
     disabled_text: str
@@ -33,13 +34,15 @@ class ThemeTokens:
 LIGHT = ThemeTokens(
     background="#F4F6F6", surface="#FFFFFF", elevated="#EEF1F1", border="#D9DEDE",
     text="#171A1A", muted="#687071", accent=IGLOO_GREEN, primary=PRIMARY_GREEN,
-    primary_text="#FFFFFF", selection="#DDF4EF", warning="#B66A00", danger="#B42318",
+    primary_text="#FFFFFF", selection="#DDF4EF", warning="#B66A00", warning_surface="#FFF3D6",
+    danger="#B42318",
     input_border="#BBC4C3", disabled_text="#A0A7A7", disabled_surface="#F0F2F2",
 )
 DARK = ThemeTokens(
     background="#111716", surface="#18211F", elevated="#202B28", border="#344440",
     text="#F2F7F6", muted="#A6B2AF", accent=IGLOO_GREEN, primary=IGLOO_GREEN,
-    primary_text="#07110F", selection="#163B34", warning="#F5B84B", danger="#FF6B6B",
+    primary_text="#07110F", selection="#163B34", warning="#F5B84B", warning_surface="#3A2D18",
+    danger="#FF6B6B",
     input_border="#50625E", disabled_text="#75827F", disabled_surface="#242E2C",
 )
 
@@ -106,19 +109,28 @@ def _style_sheet(t: ThemeTokens) -> str:
 QWidget {{ color: {t.text}; font-family: "Malgun Gothic", "Segoe UI"; font-size: 10pt; }}
 QMainWindow, QWidget#appRoot, QDialog, QMessageBox {{ background: {t.background}; }}
 QWidget[card="true"] {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 8px; }}
+QWidget#appCommandBar {{ border-radius: 8px; }}
 QLabel[role="title"] {{ font-size: 17pt; font-weight: 700; color: {t.text}; }}
 QLabel[role="section"] {{ font-size: 12pt; font-weight: 700; color: {t.text}; }}
 QLabel[role="muted"] {{ color: {t.muted}; }}
 QLabel[status="active"] {{ color: {t.accent}; font-weight: 700; }}
 QLabel[status="warning"] {{ color: {t.warning}; font-weight: 700; }}
 QLabel[status="error"] {{ color: {t.danger}; font-weight: 700; }}
+QLabel[badge="true"] {{ min-height: 24px; padding: 0 8px; border: 1px solid {t.border};
+    border-radius: 12px; background: {t.elevated}; color: {t.muted}; }}
+QLabel[badge="true"][status="active"] {{ color: {t.accent}; border-color: {t.accent}; background: {t.selection}; }}
+QLabel[badge="true"][status="error"] {{ color: {t.danger}; border-color: {t.danger}; }}
+QLabel[badge="true"][status="warning"] {{ color: {t.warning}; border-color: {t.warning}; background: {t.warning_surface}; }}
 QPushButton {{ min-height: 32px; padding: 0 10px; border-radius: 6px;
     border: 1px solid {t.input_border}; background: {t.surface}; color: {t.text}; }}
 QPushButton:hover, QToolButton:hover {{ border-color: {t.accent}; background: {t.selection}; }}
+QPushButton:pressed {{ background: {t.elevated}; }}
+QPushButton:focus, QToolButton:focus {{ border: 2px solid {t.accent}; }}
 QPushButton:disabled, QToolButton:disabled {{ color: {t.disabled_text}; background: {t.disabled_surface}; border-color: {t.border}; }}
 QPushButton[primary="true"] {{ background: {t.primary}; color: {t.primary_text}; border-color: {t.primary}; font-weight: 700; }}
 QPushButton[danger="true"], QToolButton[danger="true"] {{ color: {t.danger}; border-color: {t.danger}; background: {t.surface}; }}
 QPushButton[view="true"] {{ min-height: 28px; padding: 0 10px; }}
+QPushButton[compact="true"] {{ min-height: 28px; max-height: 28px; padding: 0 9px; }}
 QPushButton[view="true"]:checked {{ background: {t.selection}; color: {t.accent}; border-color: {t.accent}; font-weight: 700; }}
 QDialog QPushButton[primary="true"] {{ min-height: 36px; }}
 QToolButton {{ min-width: 28px; min-height: 28px; max-width: 28px; max-height: 28px;
@@ -137,7 +149,8 @@ QLabel[calendarDate="true"] {{ font-weight: 700; color: {t.text}; border: 0; bac
 QToolButton[calendarEntry="true"] {{ min-height: 20px; max-height: 20px; max-width: 16777215px;
     padding: 0 4px; border: 1px solid transparent; border-radius: 4px; text-align: left;
     background: {t.selection}; color: {t.text}; font-size: 9pt; }}
-QToolButton[calendarEntry="true"][calendarSource="planned"] {{ background: {t.elevated}; color: {t.muted}; }}
+QToolButton[calendarEntry="true"][progressState="done"] {{ background: {t.disabled_surface}; color: {t.muted}; }}
+QToolButton[calendarEntry="true"][warning="true"] {{ background: {t.warning_surface}; color: {t.warning}; }}
 QToolButton[calendarEntry="true"][deadline="true"] {{ border-color: {t.warning}; color: {t.warning}; font-weight: 700; }}
 QToolButton[calendarEntry="true"][calendarMore="true"] {{ background: transparent; color: {t.accent}; font-weight: 700; }}
 QToolButton[calendarEntry="true"]:hover {{ border-color: {t.accent}; background: {t.selection}; }}

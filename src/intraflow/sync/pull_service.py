@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from intraflow.models import (
     Assignment,
     AssignmentProgress,
-    CalendarEvent,
     Part,
     ProgressHistory,
     Project,
@@ -19,7 +18,7 @@ from intraflow.models import (
     User,
     WorkItem,
 )
-from intraflow.services.errors import SyncError, UserPublicConflictError
+from intraflow.services.errors import RevisionConflictError, SyncError, UserPublicConflictError
 from intraflow.sync.nas_client import NasClient
 from intraflow.sync.schemas import (
     ProjectSnapshot,
@@ -47,10 +46,10 @@ class PullService:
         if not isinstance(snapshot, UsersSnapshot):
             raise SyncError("users.json is not a USERS snapshot")
         with self.session_factory.begin() as session:
-            if session.query(SyncOutbox).filter_by(target_type="USERS", target_id="global").one_or_none():
-                raise SyncError("로컬 사용자 변경이 있어 Pull할 수 없습니다. 먼저 Push하거나 충돌을 해결하세요.")
             if not self._newer(session, "USERS", "global", snapshot.revision):
                 return False
+            if session.query(SyncOutbox).filter_by(target_type="USERS", target_id="global").one_or_none():
+                raise RevisionConflictError("로컬 사용자 변경과 NAS 변경이 겹쳤습니다. 공유 정의 충돌을 해결하세요.")
             for data in snapshot.users:
                 value = session.get(User, data.id)
                 if value is None:
@@ -66,10 +65,10 @@ class PullService:
         if not isinstance(snapshot, UnitsSnapshot):
             raise SyncError("units.json is not a UNITS snapshot")
         with self.session_factory.begin() as session:
-            if session.query(SyncOutbox).filter_by(target_type="UNITS", target_id="global").one_or_none():
-                raise SyncError("로컬 단위 변경이 있어 Pull할 수 없습니다. 먼저 Push하거나 충돌을 해결하세요.")
             if not self._newer(session, "UNITS", "global", snapshot.revision):
                 return False
+            if session.query(SyncOutbox).filter_by(target_type="UNITS", target_id="global").one_or_none():
+                raise RevisionConflictError("로컬 단위 변경과 NAS 변경이 겹쳤습니다. 공유 정의 충돌을 해결하세요.")
             for data in snapshot.units:
                 value = session.get(Unit, data.id)
                 if value is None:
@@ -86,10 +85,10 @@ class PullService:
             raise SyncError("project path does not match project snapshot")
         with self.session_factory.begin() as session:
             dirty = session.query(SyncOutbox).filter_by(target_type="PROJECT", target_id=project_id).one_or_none()
-            if dirty is not None:
-                raise SyncError("로컬 프로젝트 변경이 있어 Pull할 수 없습니다. 먼저 Push하거나 충돌을 해결하세요.")
             if not self._newer(session, "PROJECT", project_id, snapshot.revision):
                 return False
+            if dirty is not None:
+                raise RevisionConflictError("로컬 프로젝트 변경과 NAS 변경이 겹쳤습니다. 공유 정의 충돌을 해결하세요.")
             self._upsert_project(session, snapshot)
             self._state(session, "PROJECT", project_id, snapshot.revision, snapshot.model_dump(mode="json"))
         return True
@@ -160,14 +159,6 @@ class PullService:
                     for field, item in values.items():
                         if field != "id":
                             setattr(value, field, item)
-            for data in snapshot.team_calendar_events:
-                value = session.get(CalendarEvent, data.id)
-                if value is None:
-                    value = CalendarEvent(id=data.id)
-                    session.add(value)
-                for field, item in data.model_dump().items():
-                    if field != "id":
-                        setattr(value, field, int(item) if field == "is_deleted" else item)
             self._state(session, "USER_PUBLIC", user_id, snapshot.revision, snapshot.model_dump(mode="json"))
         return True
 
@@ -191,6 +182,7 @@ class PullService:
         state.remote_revision = revision
         state.last_sync_at = utc_now_iso()
         state.last_hash = _hash(payload)
+        state.base_snapshot_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     @staticmethod
     def _upsert_project(session: Session, snapshot: ProjectSnapshot) -> None:

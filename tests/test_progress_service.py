@@ -12,13 +12,12 @@ from intraflow.services.setup_service import SetupService
 from workflow import build_workflow
 
 
-def test_progress_quantity_note_schedule_and_history(session_factory: sessionmaker[Session]) -> None:
+def test_progress_quantity_note_and_history(session_factory: sessionmaker[Session]) -> None:
     identity, _admin, _work, _project, _part, item = build_workflow(session_factory)
     service = ProgressService(session_factory, current_user_id=identity.user_id, current_device_id=identity.device_id)
     service.add_delta(item.assignment_id, 3, "시작")
     service.set_completed_quantity(item.assignment_id, 5)
     service.set_note(item.assignment_id, "현재 메모")
-    service.set_schedule(item.assignment_id, "2026-08-03", "2026-08-10")
     with session_factory() as session:
         progress = session.get(AssignmentProgress, item.assignment_id)
         histories = list(session.scalars(select(ProgressHistory).where(
@@ -26,7 +25,6 @@ def test_progress_quantity_note_schedule_and_history(session_factory: sessionmak
         outboxes = list(session.scalars(select(SyncOutbox).where(SyncOutbox.target_type == "USER_PUBLIC")))
     assert progress is not None and progress.completed_quantity == 5
     assert progress.note == "현재 메모"
-    assert progress.schedule_start == "2026-08-03"
     assert len(histories) == 3
     assert len(outboxes) == 1
 

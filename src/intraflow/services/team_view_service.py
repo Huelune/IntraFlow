@@ -27,7 +27,6 @@ class TeamCalendarEntry:
     work_name: str
     start_date: str
     end_date: str
-    source: str
     progress_ratio: float
     progress_state: str
     effective_active: bool
@@ -123,28 +122,18 @@ class TeamViewService:
         rows = self._rows(filters)
         entries: list[TeamCalendarEntry] = []
         for row in rows:
-            actual = None
-            if row.progress and row.progress.schedule_start and row.progress.schedule_end:
-                actual = (row.progress.schedule_start, row.progress.schedule_end)
-            planned = (row.item.planned_start, row.item.planned_end)
-            periods: list[tuple[str, str, str]] = []
-            if actual:
-                source = "BOTH" if actual == planned else "ACTUAL"
-                periods.append((actual[0], actual[1], source))
-            if planned != actual:
-                periods.append((planned[0], planned[1], "PLANNED"))
-            for period_start, period_end, source in periods:
-                if period_end < start_date or period_start > end_date:
-                    continue
-                entries.append(TeamCalendarEntry(
-                    work_item_id=row.item.id, assignment_id=row.assignment.id,
-                    owner_name=row.user.display_name, project_name=row.project.name,
-                    part_name=row.part.name, work_name=row.item.name,
-                    start_date=period_start, end_date=period_end, source=source,
-                    progress_ratio=row.ratio, progress_state=row.progress_state,
-                    effective_active=row.effective_active, date_warning=row.warning,
-                ))
-        return sorted(entries, key=lambda x: (x.start_date, x.owner_name, x.path, x.source))
+            period_start, period_end = row.item.planned_start, row.item.planned_end
+            if period_end < start_date or period_start > end_date:
+                continue
+            entries.append(TeamCalendarEntry(
+                work_item_id=row.item.id, assignment_id=row.assignment.id,
+                owner_name=row.user.display_name, project_name=row.project.name,
+                part_name=row.part.name, work_name=row.item.name,
+                start_date=period_start, end_date=period_end,
+                progress_ratio=row.ratio, progress_state=row.progress_state,
+                effective_active=row.effective_active, date_warning=row.warning,
+            ))
+        return sorted(entries, key=lambda x: (x.start_date, x.owner_name, x.path))
 
     def get_progress_overview(
         self, filters: TeamViewFilters = TeamViewFilters(),

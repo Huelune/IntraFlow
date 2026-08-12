@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 from intraflow.services.administration_service import AdministrationService
 from intraflow.services.progress_service import ProgressService
 from intraflow.services.work_service import WorkService
-from intraflow.ui.dialogs import DeviceDialog, PartDialog, ProjectDialog, UnitDialog, UserDialog
+from intraflow.ui.dialogs import PartDialog, ProjectDialog, UnitDialog, UserDialog
 from intraflow.ui.table_view import configure_columns
 from intraflow.ui.time_display import TimeDisplay
 
@@ -25,14 +25,13 @@ class AdministrationWidget(QWidget):
         self.time_display = time_display or TimeDisplay()
         self.current_type: str | None = None
         self.current_id: str | None = None
-        self.user_current_type: str | None = None
         self.user_current_id: str | None = None
         self.unit_current_id: str | None = None
         self.is_admin, _ = service.current_permissions()
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_hierarchy(), "프로젝트·파트")
         if self.is_admin:
-            self.tabs.addTab(self._build_users(), "사용자·기기")
+            self.tabs.addTab(self._build_users(), "사용자")
             self.tabs.addTab(self._build_units(), "단위")
         layout = QVBoxLayout(self)
         layout.addWidget(self.tabs)
@@ -81,21 +80,19 @@ class AdministrationWidget(QWidget):
 
     def _build_users(self) -> QWidget:
         self.user_tree = QTreeWidget()
-        self.user_tree.setHeaderLabels(["사용자 / 기기", "유형", "상태"])
+        self.user_tree.setHeaderLabels(["사용자", "권한", "상태"])
         self.user_tree.setAlternatingRowColors(True)
-        configure_columns(self.user_tree, "admin-users-devices", (240, 120, 100))
+        configure_columns(self.user_tree, "admin-users", (240, 140, 100))
         self.user_tree.itemSelectionChanged.connect(self._load_user_detail)
         self.user_detail = _ReadOnlyDetail(self.time_display)
-        add_user, add_device, edit, refresh = (
-            QPushButton("새 사용자"), QPushButton("새 기기"), QPushButton("수정"), QPushButton("새로고침"))
+        add_user, edit, refresh = QPushButton("새 사용자"), QPushButton("수정"), QPushButton("새로고침")
         add_user.setProperty("primary", True)
         add_user.clicked.connect(self._new_user)
-        add_device.clicked.connect(self._new_device)
         edit.clicked.connect(self._edit_user_or_device)
         refresh.clicked.connect(self.refresh)
-        self.user_edit_button, self.new_device_button = edit, add_device
+        self.user_edit_button = edit
         actions = QHBoxLayout()
-        for button in (refresh, add_user, add_device, edit):
+        for button in (refresh, add_user, edit):
             actions.addWidget(button)
         detail_card = QWidget()
         detail_card.setProperty("card", True)
@@ -195,24 +192,18 @@ class AdministrationWidget(QWidget):
             self._refresh_units()
 
     def _refresh_users(self) -> None:
-        selected = (getattr(self, "user_current_type", None), getattr(self, "user_current_id", None))
-        users, devices = self.service.list_users(), self.service.list_devices()
+        selected = getattr(self, "user_current_id", None)
+        users = self.service.list_users()
         self.user_tree.blockSignals(True)
         self.user_tree.clear()
         nodes = {}
         for user in users:
-            node = QTreeWidgetItem([user.display_name, "사용자", "활성" if user.is_active else "비활성"])
-            node.setData(0, Qt.ItemDataRole.UserRole, ("user", user.id))
+            role = "시스템 관리자" if user.is_system_admin else "일반 사용자"
+            node = QTreeWidgetItem([user.display_name, role, "활성" if user.is_active else "비활성"])
+            node.setData(0, Qt.ItemDataRole.UserRole, user.id)
             self.user_tree.addTopLevelItem(node)
             nodes[user.id] = node
-        for device in devices:
-            parent = nodes.get(device.user_id)
-            if parent:
-                node = QTreeWidgetItem([device.device_name or "이름 없음", "기기", "현재" if device.is_current else "등록"])
-                node.setData(0, Qt.ItemDataRole.UserRole, ("device", device.id))
-                parent.addChild(node)
-        self.user_tree.expandAll()
-        node = self._find_node(self.user_tree, *selected)
+        node = next((nodes[user_id] for user_id in nodes if user_id == selected), None)
         if node:
             self.user_tree.setCurrentItem(node)
         self.user_tree.blockSignals(False)
@@ -249,9 +240,11 @@ class AdministrationWidget(QWidget):
         self.hierarchy_history.setRowCount(0)
         if kind == "project":
             project = next(x for x in self.service.list_projects() if x.id == identity)
+            editors = ", ".join(user.display_name for user in self.service.list_project_editors(project.id))
             self.hierarchy_detail.show_values(project.name, [
                 ("설명", project.description or "설명 없음"), ("기간", f"{project.planned_start} ~ {project.planned_end}"),
                 ("상태", "활성" if project.status == "ACTIVE" else "비활성"),
+                ("프로젝트 편집자", editors or "없음"),
             ])
             manageable = self.service.can_manage_project(project.id)
             self.new_part_button.setEnabled(manageable)
@@ -285,23 +278,13 @@ class AdministrationWidget(QWidget):
         selected = self.user_tree.selectedItems()
         if not selected:
             return
-        kind, identity = selected[0].data(0, Qt.ItemDataRole.UserRole)
-        self.user_current_type, self.user_current_id = kind, identity
-        if kind == "user":
-            user = next(x for x in self.service.list_users() if x.id == identity)
-            self.user_detail.show_values(user.display_name, [
-                ("사용자 코드", user.user_code), ("시스템 관리자", "예" if user.is_system_admin else "아니요"),
-                ("상태", "활성" if user.is_active else "비활성"),
-            ])
-            self.new_device_button.setEnabled(True)
-        else:
-            device = next(x for x in self.service.list_devices() if x.id == identity)
-            user = next(x for x in self.service.list_users() if x.id == device.user_id)
-            self.user_detail.show_values(device.device_name or "이름 없음", [
-                ("소유 사용자", user.display_name), ("현재 기기", "예" if device.is_current else "아니요"),
-                ("마지막 확인", device.last_seen_at or "기록 없음"),
-            ])
-            self.new_device_button.setEnabled(False)
+        identity = selected[0].data(0, Qt.ItemDataRole.UserRole)
+        self.user_current_id = identity
+        user = next(x for x in self.service.list_users() if x.id == identity)
+        self.user_detail.show_values(user.display_name, [
+            ("사용자 코드", user.user_code), ("시스템 관리자", "예" if user.is_system_admin else "아니요"),
+            ("상태", "활성" if user.is_active else "비활성"),
+        ])
         self.user_edit_button.setEnabled(True)
 
     def _load_unit_detail(self) -> None:
@@ -337,17 +320,10 @@ class AdministrationWidget(QWidget):
     def _new_user(self) -> None:
         self._run_dialog(UserDialog(self.service))
 
-    def _new_device(self) -> None:
-        user_id = self.user_current_id if self.user_current_type == "user" else None
-        self._run_dialog(DeviceDialog(self.service, user_id=user_id))
-
     def _edit_user_or_device(self) -> None:
-        if self.user_current_type == "user":
+        if self.user_current_id:
             user = next(x for x in self.service.list_users() if x.id == self.user_current_id)
             self._run_dialog(UserDialog(self.service, user))
-        elif self.user_current_type == "device":
-            device = next(x for x in self.service.list_devices() if x.id == self.user_current_id)
-            self._run_dialog(DeviceDialog(self.service, device))
 
     def _new_unit(self) -> None:
         self._run_dialog(UnitDialog(self.service))

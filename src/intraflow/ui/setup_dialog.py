@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 from PySide6.QtWidgets import (
     QButtonGroup, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton, QVBoxLayout,
@@ -14,6 +15,27 @@ from intraflow.sync.nas_client import NasClient
 from intraflow.sync.team_join_service import LocalJoinRecoveryService, TeamJoinService
 
 
+class _JoinSignals(QObject):
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+
+class _JoinJob(QRunnable):
+    def __init__(self, action) -> None:
+        super().__init__()
+        self.action = action
+        self.signals = _JoinSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self.action()
+        except Exception as exc:
+            self.signals.failed.emit(str(exc))
+        else:
+            self.signals.succeeded.emit(result)
+
+
 class SetupDialog(QDialog):
     def __init__(self, settings: AppSettings, setup: SetupService) -> None:
         super().__init__()
@@ -22,6 +44,7 @@ class SetupDialog(QDialog):
         self.recovery_service = LocalJoinRecoveryService(setup.session_factory, settings)
         self.runtime: RuntimeConfig | None = None
         self.joined_existing_team = False
+        self._join_signals: _JoinSignals | None = None
         self.setWindowTitle("IntraFlow 최초 설정")
         self.setModal(True)
         self.resize(620, 430)
@@ -98,39 +121,73 @@ class SetupDialog(QDialog):
         return layout.labelForField(widget) if isinstance(layout, QFormLayout) else None
 
     def _inspect_team(self) -> None:
-        try:
-            preview = self.join_service.inspect_team(self.nas_root.text())
-        except (IntraFlowError, OSError) as exc:
-            self.preview.setText(f"연결 실패: {exc}")
-            return
+        self.check_nas.setEnabled(False)
+        self.preview.setText("NAS 연결과 snapshot을 확인하는 중입니다…")
+        job = _JoinJob(lambda: self.join_service.inspect_team(self.nas_root.text()))
+        self._join_signals = job.signals
+        job.signals.succeeded.connect(self._inspect_succeeded)
+        job.signals.failed.connect(self._inspect_failed)
+        QThreadPool.globalInstance().start(job)
+
+    def _inspect_succeeded(self, preview) -> None:
+        self._join_signals = None
+        self.check_nas.setEnabled(True)
         warning = f" / 경고: {'; '.join(preview.warnings)}" if preview.warnings else ""
         self.preview.setText(
             f"사용자 {preview.user_count}명 · 단위 {preview.unit_count}개 · "
             f"프로젝트 {preview.project_count}개 · 공개 업무 파일 {preview.public_snapshot_count}개{warning}"
         )
 
+    def _inspect_failed(self, error: str) -> None:
+        self._join_signals = None
+        self.check_nas.setEnabled(True)
+        self.preview.setText(f"연결 실패: {error}")
+
     def accept(self) -> None:
+        if self.join_mode.isChecked():
+            self._start_join()
+            return
         try:
-            if self.join_mode.isChecked():
-                self.runtime = self.join_service.join_existing_team(
-                    self.nas_root.text(), self.user_code.text(), self.device_name.text(),
-                )
-                self.joined_existing_team = True
-            else:
-                root_value = self.nas_root.text().strip()
-                if root_value:
-                    nas = NasClient(Path(root_value).expanduser().resolve())
-                    if nas.exists_json("users.json"):
-                        raise IntraFlowError("NAS에 기존 팀이 있습니다. 기존 팀 합류를 선택하세요.")
-                identity = self.setup.start_new_team(
-                    self.user_code.text(), self.display_name.text(), self.device_name.text() or None,
-                )
-                self.runtime = RuntimeConfig(identity.user_id, identity.device_id, root_value or None)
+            root_value = self.nas_root.text().strip()
+            if root_value:
+                nas = NasClient(Path(root_value).expanduser().resolve())
+                if nas.exists_json("users.json"):
+                    raise IntraFlowError("NAS에 기존 팀이 있습니다. 기존 팀 합류를 선택하세요.")
+            identity = self.setup.start_new_team(
+                self.user_code.text(), self.display_name.text(), self.device_name.text() or None,
+            )
+            self.runtime = RuntimeConfig(identity.user_id, identity.device_id, root_value or None)
             self.settings.save_runtime_config(self.runtime)
         except (IntraFlowError, OSError) as exc:
             QMessageBox.warning(self, "최초 설정 실패", str(exc))
             return
         super().accept()
+
+    def _start_join(self) -> None:
+        self.ok_button.setEnabled(False)
+        self.check_nas.setEnabled(False)
+        self.preview.setText("NAS 데이터를 확인하고 이 PC에 적용하는 중입니다…")
+        job = _JoinJob(lambda: self.join_service.join_existing_team(
+            self.nas_root.text(), self.user_code.text(), self.device_name.text(),
+        ))
+        self._join_signals = job.signals
+        job.signals.succeeded.connect(self._join_succeeded)
+        job.signals.failed.connect(self._join_failed)
+        QThreadPool.globalInstance().start(job)
+
+    def _join_succeeded(self, runtime: RuntimeConfig) -> None:
+        self._join_signals = None
+        self.runtime = runtime
+        self.joined_existing_team = True
+        self.settings.save_runtime_config(runtime)
+        super().accept()
+
+    def _join_failed(self, error: str) -> None:
+        self._join_signals = None
+        self.ok_button.setEnabled(True)
+        self.check_nas.setEnabled(True)
+        self.preview.setText(f"연결 실패: {error}")
+        QMessageBox.warning(self, "최초 설정 실패", error)
 
     def _recover_local_setup(self) -> None:
         answer = QMessageBox.question(

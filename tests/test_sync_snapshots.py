@@ -9,6 +9,7 @@ from intraflow.sync.nas_client import NasClient
 from intraflow.sync.pull_service import PullService
 from intraflow.sync.push_service import PushService
 from intraflow.sync.snapshot_builder import SnapshotBuilder
+from intraflow.sync.schemas import snapshot_adapter
 
 from workflow import build_workflow
 
@@ -17,7 +18,7 @@ def test_project_snapshot_contains_only_project_and_parts(session_factory: sessi
     _identity, _admin, _work, project_id, _part, _item = build_workflow(session_factory)
     with session_factory() as session:
         snapshot = SnapshotBuilder(session).project(project_id)
-    assert snapshot.schema_version == 2
+    assert snapshot.schema_version == 3
     assert len(snapshot.parts) == 1
     assert snapshot.work_items == []
     assert snapshot.assignments == []
@@ -33,6 +34,29 @@ def test_user_public_snapshot_contains_owned_work_and_progress(session_factory: 
     assert snapshot.work_items[0].owner_user_id == identity.user_id
     assert len(snapshot.assignments) == 1
     assert snapshot.progress[0].completed_quantity == 4
+
+
+def test_v2_personal_schedule_is_read_but_not_written(session_factory: sessionmaker[Session]) -> None:
+    identity, _admin, _work, _project, _part, item = build_workflow(session_factory)
+    with session_factory() as session:
+        payload = SnapshotBuilder(session).user_public(identity.user_id).model_dump(mode="json")
+    payload["schema_version"] = 2
+    payload["progress"] = [{
+        "assignment_id": item.assignment_id,
+        "user_id": identity.user_id,
+        "schedule_start": "2026-08-01",
+        "schedule_end": "2026-08-10",
+        "completed_quantity": 0,
+        "revision": 1,
+        "updated_at": "2026-08-01T00:00:00Z",
+        "device_id": None,
+        "note": None,
+    }]
+    payload["team_calendar_events"] = []
+    parsed = snapshot_adapter.validate_python(payload)
+    output = parsed.model_dump(mode="json")
+    assert "schedule_start" not in output["progress"][0]
+    assert "team_calendar_events" not in output
 
 
 def test_push_pull_user_owned_work_is_read_only_data(session_factory: sessionmaker[Session], tmp_path) -> None:

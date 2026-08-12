@@ -32,7 +32,11 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     assert window.my_work.table.parentWidget().minimumWidth() >= 420
     assert isinstance(window.my_work.detail.refresh_button, QToolButton)
     assert window.my_work.detail.refresh_button.height() <= 28
+    assert not window.my_work.detail.history.isVisible()
+    window.my_work._load_selection()
+    app.processEvents()
     assert window.my_work.detail.history.isVisible()
+    assert window.my_work.master_detail.back.isVisible()
     window.my_work.detail.history_toggle.setChecked(False)
     assert not window.my_work.detail.history.isVisible()
     window.my_work.detail.history_toggle.setChecked(True)
@@ -70,8 +74,9 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     window.team_work.overview_tree.setCurrentItem(project_node)
     assert window.team_work.detail_stack.currentIndex() == 1
     assert window.team_work.aggregate_detail.title.text() == "프로젝트"
-    normal_width = window.my_work.table.width()
     window.resize(1440, 900)
     app.processEvents()
-    assert window.my_work.table.width() >= normal_width
+    assert window.my_work.table.isVisible()
+    assert window.my_work.detail.history.isVisible()
+    assert not window.my_work.master_detail.back.isVisible()
     window.close()

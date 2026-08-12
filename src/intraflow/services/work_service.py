@@ -30,8 +30,6 @@ class WorkItemView:
     completed_quantity: float
     planned_start: str | None
     planned_end: str | None
-    schedule_start: str | None
-    schedule_end: str | None
     note: str | None
     is_active: bool
     effective_active: bool
@@ -171,6 +169,26 @@ class WorkService:
                 Unit.is_active == 1
             ).order_by(Unit.sort_order, Unit.code))]
 
+    def my_work_empty_message(self, *, filtered: bool = False) -> str:
+        if filtered:
+            return "현재 필터 조건에 맞는 업무가 없습니다. 필터를 초기화해 보세요."
+        with self.session_factory() as session:
+            if not session.scalar(select(Unit.id).where(Unit.is_active == 1).limit(1)):
+                return "활성 단위가 없습니다. 시스템 관리자에게 단위 등록을 요청하세요."
+            if not session.scalar(select(Project.id).where(
+                Project.status == "ACTIVE", Project.is_deleted == 0,
+            ).limit(1)):
+                return "활성 프로젝트가 없습니다. 시스템 관리자에게 프로젝트 생성을 요청하세요."
+            if not session.scalar(select(Part.id).join(Project, Part.project_id == Project.id).where(
+                Part.is_active == 1, Part.is_deleted == 0, Project.status == "ACTIVE",
+            ).limit(1)):
+                return "업무를 추가할 수 있는 활성 파트가 없습니다. 프로젝트 관리자에게 파트 생성을 요청하세요."
+            if not session.scalar(select(WorkItem.id).where(
+                WorkItem.owner_user_id == self.current_user_id, WorkItem.is_deleted == 0,
+            ).limit(1)):
+                return "아직 내 업무가 없습니다. ‘새 업무’를 눌러 첫 업무를 추가하세요."
+        return "비활성 업무가 숨겨져 있습니다. ‘비활성 포함’을 확인해 보세요."
+
     def _list(self, include_inactive: bool) -> list[WorkItemView]:
         statement = (
             select(WorkItem, Assignment, AssignmentProgress, Part, Project, Unit, User)
@@ -191,8 +209,6 @@ class WorkService:
             weight=float(item.weight),
             completed_quantity=float(progress.completed_quantity) if progress else 0.0,
             planned_start=item.planned_start, planned_end=item.planned_end,
-            schedule_start=progress.schedule_start if progress else None,
-            schedule_end=progress.schedule_end if progress else None,
             note=progress.note if progress else None, is_active=bool(item.is_active),
             effective_active=bool(item.is_active and part.is_active and project.status == "ACTIVE"),
             date_warning=bool(item.planned_start < part.planned_start or item.planned_end > part.planned_end),

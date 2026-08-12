@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox,
+    QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox,
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QStyle, QTableWidget, QTableWidgetItem,
     QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -19,13 +19,6 @@ from intraflow.ui.dialogs import WorkItemDialog
 from intraflow.ui.table_view import configure_columns
 from intraflow.ui.team_calendar import TeamMonthCalendar
 from intraflow.ui.time_display import TimeDisplay
-
-
-def date_edit() -> QDateEdit:
-    value = QDateEdit(QDate.currentDate())
-    value.setCalendarPopup(True)
-    value.setDisplayFormat("yyyy-MM-dd")
-    return value
 
 
 class WorkDetailPanel(QWidget):
@@ -112,8 +105,6 @@ class WorkDetailPanel(QWidget):
         self.note = QTextEdit()
         self.note.setMaximumHeight(64)
         self.save_note_button, self.clear_note_button = QPushButton("저장"), QPushButton("지우기")
-        self.schedule_start, self.schedule_end = date_edit(), date_edit()
-        self.save_schedule_button = QPushButton("일정 저장")
         self.result = QLabel()
         self.result.setProperty("status", "active")
         progress_form = QGridLayout()
@@ -131,12 +122,7 @@ class WorkDetailPanel(QWidget):
         progress_form.addWidget(_muted("현재 메모"), 1, 0)
         progress_form.addWidget(self.note, 1, 1, 1, 5)
         progress_form.addLayout(note_row, 2, 1, 1, 5)
-        progress_form.addWidget(_muted("개인 일정"), 3, 0)
-        progress_form.addWidget(self.schedule_start, 3, 1)
-        progress_form.addWidget(QLabel("~"), 3, 2)
-        progress_form.addWidget(self.schedule_end, 3, 3)
-        progress_form.addWidget(self.save_schedule_button, 3, 4, 1, 2)
-        progress_form.addWidget(self.result, 4, 0, 1, 6)
+        progress_form.addWidget(self.result, 3, 0, 1, 6)
         progress_form.setColumnStretch(1, 1)
         progress_form.setColumnStretch(4, 1)
         layout.addWidget(_section("진행 상태 바로 입력"))
@@ -144,8 +130,6 @@ class WorkDetailPanel(QWidget):
         self.delta.valueChanged.connect(self._mark_dirty)
         self.absolute.valueChanged.connect(self._mark_dirty)
         self.note.textChanged.connect(self._mark_dirty)
-        self.schedule_start.dateChanged.connect(self._mark_dirty)
-        self.schedule_end.dateChanged.connect(self._mark_dirty)
 
     def _tool_button(
         self, icon: QStyle.StandardPixmap, tooltip: str, *, danger: bool = False,
@@ -202,14 +186,12 @@ class WorkDetailPanel(QWidget):
         self.delete_button.setVisible(self.owner_mode)
         self.open_my_button.setVisible(show_open_my)
         if self.owner_mode and (changed or force_inputs or not self.inputs_dirty):
-            widgets = (self.delta, self.absolute, self.note, self.schedule_start, self.schedule_end)
+            widgets = (self.delta, self.absolute, self.note)
             for widget in widgets:
                 widget.blockSignals(True)
             self.delta.setValue(0)
             self.absolute.setValue(item.completed_quantity)
             self.note.setPlainText(item.note or "")
-            _set_date(self.schedule_start, item.schedule_start or item.planned_start)
-            _set_date(self.schedule_end, item.schedule_end or item.planned_end)
             for widget in widgets:
                 widget.blockSignals(False)
             self.inputs_dirty = False
@@ -227,6 +209,50 @@ class WorkDetailPanel(QWidget):
 
     def _mark_dirty(self, *_args) -> None:
         self.inputs_dirty = True
+
+
+class AdaptiveMasterDetail(QWidget):
+    """Use a split view when wide and a list/detail transition when narrow."""
+
+    def __init__(self, master: QWidget, detail: QWidget, *, breakpoint: int = 1250) -> None:
+        super().__init__()
+        self.master, self.detail, self.breakpoint = master, detail, breakpoint
+        self.detail_active = False
+        self.back = QPushButton("목록으로")
+        self.back.setProperty("compact", True)
+        self.back.clicked.connect(self.show_master)
+        self.splitter = QSplitter()
+        self.splitter.addWidget(master)
+        self.splitter.addWidget(detail)
+        self.splitter.setSizes([620, 620])
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setCollapsible(1, False)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self.back, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.splitter, stretch=1)
+        self._apply_mode()
+
+    def show_detail(self) -> None:
+        self.detail_active = True
+        self._apply_mode()
+
+    def show_master(self) -> None:
+        self.detail_active = False
+        self._apply_mode()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._apply_mode()
+
+    def _apply_mode(self) -> None:
+        narrow = self.width() < self.breakpoint
+        self.back.setVisible(narrow and self.detail_active)
+        self.master.setVisible(not narrow or not self.detail_active)
+        self.detail.setVisible(not narrow or self.detail_active)
 
 
 class MyWorkWidget(QWidget):
@@ -269,7 +295,6 @@ class MyWorkWidget(QWidget):
         self.detail.apply_absolute_button.clicked.connect(self.apply_absolute)
         self.detail.save_note_button.clicked.connect(lambda: self.save_note(False))
         self.detail.clear_note_button.clicked.connect(lambda: self.save_note(True))
-        self.detail.save_schedule_button.clicked.connect(self.save_schedule)
         filters = QHBoxLayout()
         filters.addWidget(self.filter_project)
         filters.addWidget(self.filter_part)
@@ -284,15 +309,19 @@ class MyWorkWidget(QWidget):
         list_layout.setContentsMargins(12, 12, 12, 12)
         list_layout.addLayout(filters)
         list_layout.addWidget(self.table)
-        splitter = QSplitter()
-        splitter.addWidget(list_card)
-        splitter.addWidget(_detail_scroll(self.detail))
-        splitter.setSizes([620, 620])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        splitter.setCollapsible(1, False)
+        self.master_detail = AdaptiveMasterDetail(list_card, _detail_scroll(self.detail))
         layout = QVBoxLayout(self)
-        layout.addWidget(splitter)
+        layout.setContentsMargins(0, 0, 0, 0)
+        header = QHBoxLayout()
+        title = QLabel("내 업무")
+        title.setProperty("role", "title")
+        self.count_label = QLabel()
+        self.count_label.setProperty("role", "muted")
+        header.addWidget(title)
+        header.addWidget(self.count_label)
+        header.addStretch()
+        layout.addLayout(header)
+        layout.addWidget(self.master_detail, stretch=1)
         self.refresh()
 
     def refresh(
@@ -305,11 +334,12 @@ class MyWorkWidget(QWidget):
         rows = [item for item in all_rows if self._matches_filters(item)]
         if not self.include_inactive.isChecked():
             rows = [item for item in rows if item.effective_active]
+        self.count_label.setText(f"{len(rows)}개 / 전체 {len(all_rows)}개")
         self.table.blockSignals(True)
         self.table.setRowCount(len(rows))
         selected_row = -1
         for row_index, item in enumerate(rows):
-            schedule = f"{item.schedule_start or '-'} ~ {item.schedule_end or '-'}"
+            schedule = f"{item.planned_start or '-'} ~ {item.planned_end or '-'}"
             state = "일정 경고" if item.date_warning else ("활성" if item.effective_active else "비활성")
             values = [item.name, item.project_name, item.part_name, state, f"{item.completed_quantity:g}",
                       f"{item.total_quantity:g}", "", schedule, item.note or ""]
@@ -328,8 +358,12 @@ class MyWorkWidget(QWidget):
             self._load_detail(force_inputs=force_inputs)
         else:
             self.current_item_id = self.current_assignment_id = None
+            filters_active = bool(
+                self.filter_project.currentData() or self.filter_part.currentData()
+                or self.filter_progress.currentData() not in {None, "ALL"}
+            )
             message = ("선택한 업무가 현재 필터에서 제외되었거나 삭제되었습니다."
-                       if had_selection else "표시할 업무가 없습니다.")
+                       if had_selection else self.work.my_work_empty_message(filtered=filters_active))
             self.detail.clear(message)
 
     def manual_refresh(self) -> None:
@@ -374,11 +408,6 @@ class MyWorkWidget(QWidget):
             self._progress_run(lambda: self.progress.set_note(
                 self.current_assignment_id, None if clear else self.detail.note.toPlainText()))
 
-    def save_schedule(self) -> None:
-        if self.current_assignment_id:
-            self._progress_run(lambda: self.progress.set_schedule(
-                self.current_assignment_id, _date(self.detail.schedule_start), _date(self.detail.schedule_end)))
-
     def select_item(self, work_item_id: str) -> None:
         self.current_item_id = work_item_id
         self.include_inactive.setChecked(True)
@@ -411,6 +440,7 @@ class MyWorkWidget(QWidget):
         changed = self.current_item_id != cell.data(Qt.ItemDataRole.UserRole)
         self.current_item_id = cell.data(Qt.ItemDataRole.UserRole)
         self.current_assignment_id = cell.data(Qt.ItemDataRole.UserRole + 1)
+        self.master_detail.show_detail()
         self._load_detail(force_inputs=changed)
 
     def _load_detail(self, *, force_inputs: bool) -> None:
@@ -538,16 +568,20 @@ class TeamWorkWidget(QWidget):
                        self.filter_progress, self.include_inactive):
             filters.addWidget(widget)
         filters.addStretch()
-        splitter = QSplitter()
-        splitter.addWidget(self.left_stack)
-        splitter.addWidget(self.detail_stack)
-        splitter.setSizes([620, 620])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 1)
-        splitter.setCollapsible(1, False)
+        self.master_detail = AdaptiveMasterDetail(self.left_stack, self.detail_stack)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        page_header = QHBoxLayout()
+        page_title = QLabel("팀 업무")
+        page_title.setProperty("role", "title")
+        self.team_count_label = QLabel()
+        self.team_count_label.setProperty("role", "muted")
+        page_header.addWidget(page_title)
+        page_header.addWidget(self.team_count_label)
+        page_header.addStretch()
+        layout.addLayout(page_header)
         layout.addLayout(filters)
-        layout.addWidget(splitter)
+        layout.addWidget(self.master_detail, stretch=1)
         self.refresh()
 
     def _build_list_page(self) -> QWidget:
@@ -573,11 +607,11 @@ class TeamWorkWidget(QWidget):
         self.calendar.selectionChanged.connect(self._refresh_agenda)
         self.calendar.currentPageChanged.connect(lambda *_args: self._refresh_calendar())
         self.calendar.workActivated.connect(self._select_calendar_work)
-        self.agenda = QTableWidget(0, 6)
-        self.agenda.setHorizontalHeaderLabels(["구분", "소유자", "업무", "기간", "상태", "진행률"])
+        self.agenda = QTableWidget(0, 5)
+        self.agenda.setHorizontalHeaderLabels(["소유자", "업무", "계획 기간", "상태", "진행률"])
         self.agenda.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.agenda.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        configure_columns(self.agenda, "team-calendar-agenda", (75, 110, 260, 190, 90, 110))
+        configure_columns(self.agenda, "team-calendar-agenda", (110, 300, 190, 90, 110))
         self.agenda.itemSelectionChanged.connect(self._load_agenda_selection)
         page = QWidget()
         page.setProperty("card", True)
@@ -631,6 +665,7 @@ class TeamWorkWidget(QWidget):
         rows = [x for x in all_rows if self._matches_filters(x)]
         if not self.include_inactive.isChecked():
             rows = [x for x in rows if x.effective_active]
+        self.team_count_label.setText(f"{len(rows)}개 / 전체 {len(all_rows)}개")
         self.table.blockSignals(True)
         self.table.setRowCount(len(rows))
         selected_row = -1
@@ -665,6 +700,7 @@ class TeamWorkWidget(QWidget):
 
     def _select_calendar_work(self, work_item_id: str) -> None:
         self.current_item_id = work_item_id
+        self.master_detail.show_detail()
         self._refresh_agenda()
         self._load_detail()
 
@@ -676,14 +712,13 @@ class TeamWorkWidget(QWidget):
         self.agenda.blockSignals(True)
         self.agenda.setRowCount(len(rows))
         selected_row = -1
-        source_labels = {"ACTUAL": "개인", "PLANNED": "계획", "BOTH": "일정"}
         for row_index, entry in enumerate(rows):
-            values = [source_labels[entry.source], entry.owner_name, entry.path,
+            values = [entry.owner_name, entry.path,
                       f"{entry.start_date} ~ {entry.end_date}", _progress_text(entry.progress_state),
                       f"{entry.progress_ratio:.0%}"]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(value)
-                if column == 2:
+                if column == 1:
                     cell.setData(Qt.ItemDataRole.UserRole, entry.work_item_id)
                 self.agenda.setItem(row_index, column, cell)
             if entry.work_item_id == selected:
@@ -758,12 +793,16 @@ class TeamWorkWidget(QWidget):
         row = self.table.currentRow()
         cell = self.table.item(row, 3) if row >= 0 else None
         self.current_item_id = cell.data(Qt.ItemDataRole.UserRole) if cell else None
+        if self.current_item_id:
+            self.master_detail.show_detail()
         self._load_detail()
 
     def _load_agenda_selection(self) -> None:
         row = self.agenda.currentRow()
-        cell = self.agenda.item(row, 2) if row >= 0 else None
+        cell = self.agenda.item(row, 1) if row >= 0 else None
         self.current_item_id = cell.data(Qt.ItemDataRole.UserRole) if cell else None
+        if self.current_item_id:
+            self.master_detail.show_detail()
         self._load_detail()
 
     def _load_overview_selection(self) -> None:
@@ -775,9 +814,11 @@ class TeamWorkWidget(QWidget):
         if node.node_type == "WORK":
             self.current_item_id = node.id
             self.detail_stack.setCurrentIndex(0)
+            self.master_detail.show_detail()
             self._load_detail()
         else:
             self.detail_stack.setCurrentIndex(1)
+            self.master_detail.show_detail()
             self.aggregate_detail.load(node, path)
 
     def _load_detail(self) -> None:
@@ -871,15 +912,6 @@ def _quantity(maximum: float, default: float, *, minimum: float = 0) -> QDoubleS
     value.setDecimals(3)
     value.setValue(default)
     return value
-
-
-def _date(widget: QDateEdit) -> str:
-    return widget.date().toString("yyyy-MM-dd")
-
-
-def _set_date(widget: QDateEdit, value: str | None) -> None:
-    if value:
-        widget.setDate(QDate.fromString(value, "yyyy-MM-dd"))
 
 
 def _fill_filter(combo: QComboBox, label: str, values: list[tuple[str, str]], selected: str | None) -> None:

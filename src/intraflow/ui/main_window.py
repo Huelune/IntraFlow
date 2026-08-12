@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QVBoxLayout, QWidget
 
 from intraflow.config import AppSettings, RuntimeConfig, settings as default_settings
 from intraflow.services.administration_service import AdministrationService
 from intraflow.services.progress_service import ProgressService
 from intraflow.services.team_view_service import TeamViewService
 from intraflow.services.work_service import WorkService
+from intraflow.services.workstation_service import WorkstationService
 from intraflow.sync.sync_service import SyncService
 from intraflow.ui.administration_widget import AdministrationWidget
+from intraflow.ui.command_bar import AppCommandBar
 from intraflow.ui.settings_widget import PersonalSettingsWidget
 from intraflow.ui.sync_controller import SyncController
 from intraflow.ui.sync_widget import SyncWidget
@@ -38,6 +40,7 @@ class MainWindow(QMainWindow):
         self.my_work = MyWorkWidget(
             work, progress, self.refresh_all, time_display=self.time_display,
         )
+        self.sync_controller.set_auto_pull_guard(lambda: not self.my_work.detail.inputs_dirty)
         team_view = TeamViewService(work.session_factory, current_user_id=work.current_user_id)
         self.team_work = TeamWorkWidget(
             work, progress, team_view, self.open_my_work, time_display=self.time_display,
@@ -53,7 +56,15 @@ class MainWindow(QMainWindow):
                     time_display=self.time_display,
                 )
                 self.tabs.addTab(self.administration_widget, "관리")
-        self.settings_widget = PersonalSettingsWidget(self.sync_controller, self.time_display)
+        workstation = None
+        if runtime.current_user_id and runtime.current_device_id:
+            workstation = WorkstationService(
+                work.session_factory, current_user_id=runtime.current_user_id,
+                current_device_id=runtime.current_device_id,
+            )
+        self.settings_widget = PersonalSettingsWidget(
+            self.sync_controller, self.time_display, workstation,
+        )
         self.tabs.addTab(self.settings_widget, "개인 설정")
         self.sync_widget = None
         if sync is not None:
@@ -67,43 +78,14 @@ class MainWindow(QMainWindow):
         root_layout = QVBoxLayout(root)
         root_layout.setContentsMargins(16, 12, 16, 16)
         root_layout.setSpacing(8)
-        root_layout.addLayout(self._build_header(work.current_user_name()))
+        self.command_bar = AppCommandBar(self.sync_controller, work.current_user_name())
+        root_layout.addWidget(self.command_bar)
         root_layout.addWidget(self.tabs)
         self.setCentralWidget(root)
         self.local_refresh_timer = QTimer(self)
         self.local_refresh_timer.setInterval(5_000)
         self.local_refresh_timer.timeout.connect(lambda: self.refresh_current_tab(automatic=True))
         self.local_refresh_timer.start()
-        self.sync_controller.status_changed.connect(self._refresh_header)
-        self.sync_controller.runtime_changed.connect(lambda _runtime: self._refresh_header())
-        self._refresh_header()
-
-    def _build_header(self, user_name: str) -> QHBoxLayout:
-        title = QLabel("IntraFlow")
-        title.setProperty("role", "title")
-        self.user_label = QLabel(f"사용자  {user_name}")
-        self.user_label.setProperty("role", "muted")
-        self.auto_pull_label, self.sync_status_label = QLabel(), QLabel()
-        header = QHBoxLayout()
-        header.addWidget(title)
-        header.addSpacing(16)
-        header.addWidget(self.user_label)
-        header.addStretch()
-        header.addWidget(self.auto_pull_label)
-        header.addSpacing(12)
-        header.addWidget(self.sync_status_label)
-        return header
-
-    def _refresh_header(self) -> None:
-        runtime = self.sync_controller.runtime
-        auto = f"자동 Pull {runtime.auto_pull_interval_minutes}분" if runtime.auto_pull_enabled else "자동 Pull 꺼짐"
-        self.auto_pull_label.setText(auto)
-        self.auto_pull_label.setProperty("status", "active" if runtime.auto_pull_enabled else "")
-        self.sync_status_label.setText(self.sync_controller.status_text)
-        self.sync_status_label.setProperty("status", "error" if self.sync_controller.last_error else "active")
-        for label in (self.auto_pull_label, self.sync_status_label):
-            label.style().unpolish(label)
-            label.style().polish(label)
 
     def _runtime_changed(self, runtime: RuntimeConfig) -> None:
         self.time_display.set_timezone(runtime.display_timezone)

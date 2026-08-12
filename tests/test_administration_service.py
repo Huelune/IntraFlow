@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.services.administration_service import AdministrationService
-from intraflow.services.errors import ValidationError
+from intraflow.services.errors import PermissionDeniedError, ValidationError
 from intraflow.services.setup_service import SetupService
 
 from workflow import build_workflow
@@ -65,3 +65,17 @@ def test_last_active_admin_cannot_lose_admin_permission(session_factory: session
 
     with pytest.raises(ValidationError, match="마지막 활성 시스템 관리자"):
         admin.update_user(identity.user_id, "owner", "Owner", is_system_admin=False, is_active=True)
+
+
+def test_only_admin_replaces_project_editors(session_factory: sessionmaker[Session]) -> None:
+    _identity, admin, _work, project_id, _part, _item = build_workflow(session_factory)
+    editor_id = admin.create_user("editor", "Editor")
+    admin.replace_project_editors(project_id, {editor_id})
+    assert [user.id for user in admin.list_project_editors(project_id)] == [editor_id]
+
+    editor = AdministrationService(session_factory, current_user_id=editor_id)
+    editor.update_project(project_id, "수정 프로젝트", "2026-08-01", "2026-08-31")
+    with pytest.raises(PermissionDeniedError):
+        editor.replace_project_editors(project_id, {editor_id})
+    with pytest.raises(ValidationError, match="한 명 이상"):
+        admin.replace_project_editors(project_id, set())

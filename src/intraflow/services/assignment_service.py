@@ -17,8 +17,6 @@ class ActiveAssignment:
     unit_name: str
     allocated_quantity: float
     completed_quantity: float
-    schedule_start: str | None
-    schedule_end: str | None
 
     @property
     def progress_ratio(self) -> float:
@@ -47,8 +45,6 @@ class AssignmentService:
             part_name=part.name, unit_name=unit.display_name,
             allocated_quantity=float(assignment.allocated_quantity),
             completed_quantity=float(progress.completed_quantity) if progress else 0.0,
-            schedule_start=progress.schedule_start if progress else None,
-            schedule_end=progress.schedule_end if progress else None,
         ) for assignment, work_item, part, project, unit, progress in rows]
 
     def sync_status(self) -> str:

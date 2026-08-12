@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 Id = Annotated[str, Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")]
 UtcTimestamp = Annotated[str, Field(pattern=r"^.+Z$")]
 DateValue = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$")]
@@ -16,7 +16,7 @@ class SnapshotModel(BaseModel):
 
 
 class SnapshotBase(SnapshotModel):
-    schema_version: Literal[1, 2] = SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3] = SCHEMA_VERSION
     revision: int = Field(ge=0)
     generated_at: UtcTimestamp
 
@@ -101,8 +101,13 @@ class AssignmentData(SnapshotModel):
 class AssignmentProgressData(SnapshotModel):
     assignment_id: Id
     user_id: Id
-    schedule_start: DateValue | None = None
-    schedule_end: DateValue | None = None
+    # v2 compatibility only. These aliases are accepted but never exposed or serialized.
+    legacy_schedule_start: DateValue | None = Field(
+        default=None, validation_alias="schedule_start", exclude=True, repr=False,
+    )
+    legacy_schedule_end: DateValue | None = Field(
+        default=None, validation_alias="schedule_end", exclude=True, repr=False,
+    )
     completed_quantity: float = Field(ge=0)
     note: str | None = None
     revision: int = Field(ge=1)
@@ -122,7 +127,7 @@ class ProgressHistoryData(SnapshotModel):
     device_id: Id | None = None
 
 
-class CalendarEventData(SnapshotModel):
+class _LegacyCalendarEventData(SnapshotModel):
     id: Id
     user_id: Id
     title: str = Field(min_length=1)
@@ -169,7 +174,9 @@ class UserPublicSnapshot(SnapshotBase):
     assignments: list[AssignmentData] = Field(default_factory=list)
     progress: list[AssignmentProgressData]
     progress_history: list[ProgressHistoryData]
-    team_calendar_events: list[CalendarEventData]
+    legacy_team_calendar_events: list[_LegacyCalendarEventData] = Field(
+        default_factory=list, validation_alias="team_calendar_events", exclude=True, repr=False,
+    )
 
 
 Snapshot = Annotated[
