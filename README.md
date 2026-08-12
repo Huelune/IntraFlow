@@ -77,6 +77,12 @@ Windows의 라이트·다크 모드를 자동으로 감지해 앱 전체 Palette
 .\scripts\build-windows.ps1 -Clean
 ```
 
+`.ps1`이 메모장으로 열리거나 CMD에서 실행하는 경우에는 함께 제공되는 CMD 래퍼를 사용합니다.
+
+```bat
+.\scripts\build-windows.cmd -Clean
+```
+
 완성된 폴더와 ZIP은 `release/`에 생성됩니다. 두 번째 빌드부터 패키지 설치를 생략하려면 다음처럼 실행합니다.
 
 ```powershell
@@ -87,6 +93,18 @@ Windows의 라이트·다크 모드를 자동으로 감지해 앱 전체 Palette
 
 ```powershell
 .\scripts\build-windows.ps1 -Mode OneFile -Clean -SkipInstall
+```
+
+PowerShell에서 `.ps1`을 명시적으로 실행하려면 호출 연산자를 사용할 수도 있습니다.
+
+```powershell
+& ".\scripts\build-windows.ps1" -Mode OneFile -Clean -SkipInstall
+```
+
+최초 실행에는 빌드 패키지가 아직 없으므로 `-SkipInstall`을 사용하지 마세요.
+
+```bat
+.\scripts\build-windows.cmd -Mode OneFile -Clean
 ```
 
 사용 가능한 옵션:

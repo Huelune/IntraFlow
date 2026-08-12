@@ -82,6 +82,11 @@ if (-not $SkipInstall) {
         "zstandard" `
         "pytest>=8.0,<9.0"
     Invoke-Checked $Python "-m" "pip" "install" "--no-deps" "-e" $ProjectRoot
+} else {
+    & $Python -c "import nuitka, PySide6, sqlalchemy, alembic, pydantic"
+    if ($LASTEXITCODE -ne 0) {
+        throw "-SkipInstall을 사용할 수 없습니다. 빌드 패키지가 없습니다. -SkipInstall 없이 먼저 실행하세요."
+    }
 }
 
 if (-not $SkipTests) {
