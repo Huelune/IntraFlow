@@ -8,6 +8,16 @@ import pytest
 from intraflow.deployment import _extract_migration_archive, migration_root
 
 
+def test_windows_build_script_rejects_python_without_link_library() -> None:
+    script = (Path(__file__).parents[1] / "scripts" / "build-windows.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+
+    assert "Test-NuitkaPython" in script
+    assert "python{sys.version_info.major}{sys.version_info.minor}.lib" in script
+    assert "RecreateBuildVenv" in script
+
+
 def test_source_tree_is_used_for_migrations(tmp_path: Path) -> None:
     root = migration_root(tmp_path)
 

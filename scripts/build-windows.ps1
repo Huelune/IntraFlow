@@ -5,7 +5,10 @@ param(
 
     [string]$Version = "0.1.0",
 
+    [string]$PythonPath = "",
+
     [switch]$Clean,
+    [switch]$RecreateBuildVenv,
     [switch]$SkipTests,
     [switch]$SkipInstall,
     [switch]$AllowCompilerDownload,
@@ -27,6 +30,7 @@ if ($Help) {
     Write-Host "  최초 빌드: .\scripts\build-windows.cmd -Clean"
     Write-Host "  단일 EXE:  .\scripts\build-windows.cmd -Mode OneFile -Clean"
     Write-Host "  재빌드:    .\scripts\build-windows.cmd -Mode OneFile -Clean -SkipInstall"
+    Write-Host "  Python 지정: .\scripts\build-windows.cmd -PythonPath C:\Python312\python.exe -RecreateBuildVenv -Clean"
     exit 0
 }
 
@@ -76,18 +80,44 @@ function Invoke-Checked {
     }
 }
 
+function Test-NuitkaPython {
+    param([Parameter(Mandatory)][string]$PythonExecutable)
+
+    if (-not (Test-Path -LiteralPath $PythonExecutable -PathType Leaf)) {
+        return $false
+    }
+    & $PythonExecutable -c "import pathlib, sys; p=pathlib.Path(sys.base_prefix)/'libs'/f'python{sys.version_info.major}{sys.version_info.minor}.lib'; raise SystemExit(0 if p.is_file() else 1)"
+    return $LASTEXITCODE -eq 0
+}
+
 if ($Clean) {
     Write-Host "기존 빌드 산출물을 정리합니다." -ForegroundColor Yellow
     Remove-BuildPath $BuildRoot
     Remove-BuildPath $ReleaseRoot
 }
 
+if ($RecreateBuildVenv) {
+    Remove-BuildPath $BuildVenv
+}
+
 if (-not (Test-Path -LiteralPath $Python)) {
-    $SystemPython = Get-Command python -ErrorAction SilentlyContinue
-    if ($null -eq $SystemPython) {
-        throw "Python 3.11 이상을 찾을 수 없습니다. python 명령을 PATH에 추가하세요."
+    if ($PythonPath) {
+        $SystemPythonPath = [System.IO.Path]::GetFullPath($PythonPath)
+    } else {
+        $SystemPython = Get-Command python -ErrorAction SilentlyContinue
+        if ($null -eq $SystemPython) {
+            throw "Python 3.11 이상을 찾을 수 없습니다. python.org의 64비트 Python을 설치하거나 -PythonPath로 지정하세요."
+        }
+        $SystemPythonPath = $SystemPython.Source
     }
-    Invoke-Checked $SystemPython.Source "-m" "venv" $BuildVenv
+    if (-not (Test-NuitkaPython $SystemPythonPath)) {
+        throw "Nuitka 링크 라이브러리가 없는 Python입니다: $SystemPythonPath`npython.org의 64비트 Python 3.11/3.12를 설치하고 -PythonPath와 -RecreateBuildVenv를 사용하세요."
+    }
+    Invoke-Checked $SystemPythonPath "-m" "venv" $BuildVenv
+}
+
+if (-not (Test-NuitkaPython $Python)) {
+    throw "현재 .build-venv는 Nuitka 링크 라이브러리가 없는 Python으로 생성되었습니다.`npython.org의 64비트 Python 3.11/3.12를 설치한 뒤 다음처럼 다시 생성하세요:`n  scripts\build-windows.cmd -PythonPath C:\Python312\python.exe -RecreateBuildVenv -Mode $Mode -Clean"
 }
 
 if (-not $SkipInstall) {

@@ -87,6 +87,12 @@ CMD 래퍼는 코드 페이지와 PowerShell·Python 출력을 UTF-8로 맞춥�
 
 빌드 중 pytest와 Nuitka 캐시는 Windows 사용자 공용 경로를 사용하지 않고 각각 프로젝트의 `build/pytest-temp`, `build/nuitka-cache`를 사용합니다. 이전 관리자 실행이나 다른 계정이 만든 캐시 폴더의 권한과 관계없이 일반 사용자로 빌드할 수 있습니다.
 
+Nuitka 빌드는 `python.org`에서 설치한 64비트 Python 3.11 또는 3.12를 권장합니다. Codex 번들 Python처럼 `libs/python312.lib`가 없는 배포판은 Windows 실행 파일을 링크할 수 없습니다. 잘못된 Python으로 `.build-venv`가 만들어졌다면 정식 Python의 경로를 지정해 빌드 환경을 다시 생성합니다.
+
+```bat
+scripts\build-windows.cmd -PythonPath "C:\Users\사용자명\AppData\Local\Programs\Python\Python312\python.exe" -RecreateBuildVenv -Mode OneFile -Clean
+```
+
 완성된 폴더와 ZIP은 `release/`에 생성됩니다. 두 번째 빌드부터 패키지 설치를 생략하려면 다음처럼 실행합니다.
 
 ```powershell
