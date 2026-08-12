@@ -73,10 +73,11 @@ def test_sync_operations_are_serialized_and_preferences_are_saved(tmp_path, monk
     assert service.calls == ["pull"]
     assert controller.busy is False
 
-    controller.set_preferences(True, 30)
+    controller.set_preferences(True, 30, "Asia/Seoul")
     loaded = settings.runtime_config()
     assert loaded.auto_pull_enabled is True
     assert loaded.auto_pull_interval_minutes == 30
+    assert loaded.display_timezone == "Asia/Seoul"
     assert controller.auto_timer.interval() == 30 * 60_000
 
 

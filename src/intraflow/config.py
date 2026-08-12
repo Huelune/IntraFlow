@@ -45,6 +45,7 @@ class AppSettings:
             nas_root_path=os.getenv("INTRAFLOW_NAS_ROOT_PATH", str(values.get("nas_root_path", ""))) or None,
             auto_pull_enabled=bool(values.get("auto_pull_enabled", False)),
             auto_pull_interval_minutes=_valid_pull_interval(values.get("auto_pull_interval_minutes", 5)),
+            display_timezone=str(values.get("display_timezone", "")) or None,
         )
 
     def save_runtime_config(self, runtime: "RuntimeConfig") -> None:
@@ -55,6 +56,7 @@ class AppSettings:
             f"nas_root_path = {json.dumps(runtime.nas_root_path or '')}",
             f"auto_pull_enabled = {'true' if runtime.auto_pull_enabled else 'false'}",
             f"auto_pull_interval_minutes = {runtime.auto_pull_interval_minutes}",
+            f"display_timezone = {json.dumps(runtime.display_timezone or '')}",
             "",
         ])
         descriptor, temporary_name = tempfile.mkstemp(
@@ -78,6 +80,7 @@ class RuntimeConfig:
     nas_root_path: str | None
     auto_pull_enabled: bool = False
     auto_pull_interval_minutes: int = 5
+    display_timezone: str | None = None
 
     def require_user_id(self) -> str:
         if not self.current_user_id:

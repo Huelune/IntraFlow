@@ -5,12 +5,17 @@ from collections.abc import Callable
 from PySide6.QtWidgets import QFormLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from intraflow.ui.sync_controller import SyncController
+from intraflow.ui.time_display import TimeDisplay
 
 
 class SyncWidget(QWidget):
-    def __init__(self, controller: SyncController, on_changed: Callable[[], None]) -> None:
+    def __init__(
+        self, controller: SyncController, on_changed: Callable[[], None],
+        time_display: TimeDisplay | None = None,
+    ) -> None:
         super().__init__()
         self.controller, self.on_changed = controller, on_changed
+        self.time_display = time_display or TimeDisplay(controller.runtime.display_timezone)
         self.last_sync, self.pending, self.state, self.error = QLabel(), QLabel(), QLabel(), QLabel()
         self.error.setProperty("status", "error")
         self.pull, self.push, self.synchronize = QPushButton("Pull"), QPushButton("Push"), QPushButton("전체 동기화")
@@ -47,7 +52,10 @@ class SyncWidget(QWidget):
     def refresh(self, *_args, automatic: bool = False) -> None:
         status = self.controller.service.status() if self.controller.service else None
         self.state.setText(self.controller.status_text)
-        self.last_sync.setText(status.last_sync_at if status and status.last_sync_at else "아직 동기화하지 않음")
+        self.time_display.set_label(
+            self.last_sync, status.last_sync_at if status else None,
+            seconds=True, empty="아직 동기화하지 않음",
+        )
         self.pending.setText(str(status.pending_count) if status else "-")
         self.error.setText(self.controller.last_error or (status.last_error if status else None) or "없음")
         enabled = not self.controller.busy and self.controller.service is not None

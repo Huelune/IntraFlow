@@ -44,6 +44,7 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     window.settings_widget.refresh(automatic=True)
     assert window.settings_widget.enabled.isChecked() is True
     assert window.settings_widget.interval.currentData() == 30
+    assert window.settings_widget.timezone.findData("Asia/Seoul") >= 0
     assert window.my_work.table.rowCount() == 1
     assert isinstance(window.my_work.table.cellWidget(0, 6), ProgressCell)
     assert window.my_work.table.columnWidth(6) >= 110
@@ -54,7 +55,6 @@ def test_main_window_exposes_my_team_and_admin_workflows(session_factory: sessio
     assert window.team_work.table.rowCount() == 1
     assert window.team_work.detail.history.rowCount() == 1
     window.team_work.view_buttons[1].click()
-    window.team_work.show_planned.setChecked(True)
     window.team_work.calendar.setSelectedDate(QDate(2026, 8, 5))
     window.team_work.refresh(automatic=True)
     assert window.team_work.left_stack.currentIndex() == 1

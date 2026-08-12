@@ -13,6 +13,7 @@ from intraflow.ui.administration_widget import AdministrationWidget
 from intraflow.ui.settings_widget import PersonalSettingsWidget
 from intraflow.ui.sync_controller import SyncController
 from intraflow.ui.sync_widget import SyncWidget
+from intraflow.ui.time_display import TimeDisplay
 from intraflow.ui.work_widgets import MyWorkWidget, TeamWorkWidget
 
 
@@ -30,11 +31,17 @@ class MainWindow(QMainWindow):
             work.current_user_id, getattr(progress, "current_device_id", None), None,
         )
         self.sync_controller = SyncController(sync, app_settings, runtime)
+        self.time_display = TimeDisplay(runtime.display_timezone)
+        self.sync_controller.runtime_changed.connect(self._runtime_changed)
         self.sync_controller.succeeded.connect(lambda *_args: self.refresh_all())
         self.tabs = QTabWidget()
-        self.my_work = MyWorkWidget(work, progress, self.refresh_all)
+        self.my_work = MyWorkWidget(
+            work, progress, self.refresh_all, time_display=self.time_display,
+        )
         team_view = TeamViewService(work.session_factory, current_user_id=work.current_user_id)
-        self.team_work = TeamWorkWidget(work, progress, team_view, self.open_my_work)
+        self.team_work = TeamWorkWidget(
+            work, progress, team_view, self.open_my_work, time_display=self.time_display,
+        )
         self.tabs.addTab(self.my_work, "내 업무")
         self.tabs.addTab(self.team_work, "팀 업무")
         self.administration_widget = None
@@ -42,13 +49,17 @@ class MainWindow(QMainWindow):
             is_admin, is_editor = administration.current_permissions()
             if is_admin or is_editor:
                 self.administration_widget = AdministrationWidget(
-                    administration, work, self.refresh_all, progress=progress)
+                    administration, work, self.refresh_all, progress=progress,
+                    time_display=self.time_display,
+                )
                 self.tabs.addTab(self.administration_widget, "관리")
-        self.settings_widget = PersonalSettingsWidget(self.sync_controller)
+        self.settings_widget = PersonalSettingsWidget(self.sync_controller, self.time_display)
         self.tabs.addTab(self.settings_widget, "개인 설정")
         self.sync_widget = None
         if sync is not None:
-            self.sync_widget = SyncWidget(self.sync_controller, self.refresh_all)
+            self.sync_widget = SyncWidget(
+                self.sync_controller, self.refresh_all, self.time_display,
+            )
             self.tabs.addTab(self.sync_widget, "동기화")
         self.tabs.currentChanged.connect(self.refresh_current_tab)
         root = QWidget()
@@ -93,6 +104,11 @@ class MainWindow(QMainWindow):
         for label in (self.auto_pull_label, self.sync_status_label):
             label.style().unpolish(label)
             label.style().polish(label)
+
+    def _runtime_changed(self, runtime: RuntimeConfig) -> None:
+        self.time_display.set_timezone(runtime.display_timezone)
+        if hasattr(self, "tabs"):
+            self.refresh_all()
 
     def open_my_work(self, work_item_id: str) -> None:
         self.tabs.setCurrentWidget(self.my_work)

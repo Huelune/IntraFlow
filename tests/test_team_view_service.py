@@ -8,7 +8,7 @@ from intraflow.services.team_view_service import TeamViewFilters, TeamViewServic
 from workflow import build_workflow
 
 
-def test_calendar_uses_actual_schedule_and_optional_planned_overlay(
+def test_calendar_always_returns_actual_and_planned_schedules(
     session_factory: sessionmaker[Session],
 ) -> None:
     identity, _admin, _work, _project, _part, item = build_workflow(session_factory)
@@ -17,17 +17,28 @@ def test_calendar_uses_actual_schedule_and_optional_planned_overlay(
     ).set_schedule(item.assignment_id, "2026-08-03", "2026-08-10")
     service = TeamViewService(session_factory, current_user_id=identity.user_id)
 
-    actual = service.list_calendar_entries(
-        "2026-08-05", "2026-08-05", include_planned=False)
     combined = service.list_calendar_entries(
-        "2026-08-05", "2026-08-05", include_planned=True)
+        "2026-08-05", "2026-08-05")
 
-    assert [(x.start_date, x.end_date, x.source) for x in actual] == [
-        ("2026-08-03", "2026-08-10", "ACTUAL"),
-    ]
     assert {x.source for x in combined} == {"ACTUAL", "PLANNED"}
     assert service.list_calendar_entries(
-        "2026-08-01", "2026-08-01", include_planned=False) == []
+        "2026-07-01", "2026-07-01") == []
+
+
+def test_calendar_combines_matching_actual_and_planned_schedule(
+    session_factory: sessionmaker[Session],
+) -> None:
+    identity, _admin, _work, _project, _part, item = build_workflow(session_factory)
+    ProgressService(
+        session_factory, current_user_id=identity.user_id, current_device_id=identity.device_id,
+    ).set_schedule(item.assignment_id, item.planned_start, item.planned_end)
+
+    entries = TeamViewService(
+        session_factory, current_user_id=identity.user_id,
+    ).list_calendar_entries(item.planned_start, item.planned_end)
+
+    assert len(entries) == 1
+    assert entries[0].source == "BOTH"
 
 
 def test_progress_overview_normalizes_work_and_part_weights(

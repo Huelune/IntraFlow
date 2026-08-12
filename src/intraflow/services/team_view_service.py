@@ -117,7 +117,7 @@ class TeamViewService:
         self.current_user_id = current_user_id
 
     def list_calendar_entries(
-        self, start_date: str, end_date: str, *, include_planned: bool,
+        self, start_date: str, end_date: str, *,
         filters: TeamViewFilters = TeamViewFilters(),
     ) -> list[TeamCalendarEntry]:
         rows = self._rows(filters)
@@ -129,9 +129,9 @@ class TeamViewService:
             planned = (row.item.planned_start, row.item.planned_end)
             periods: list[tuple[str, str, str]] = []
             if actual:
-                source = "BOTH" if include_planned and actual == planned else "ACTUAL"
+                source = "BOTH" if actual == planned else "ACTUAL"
                 periods.append((actual[0], actual[1], source))
-            if include_planned and planned != actual:
+            if planned != actual:
                 periods.append((planned[0], planned[1], "PLANNED"))
             for period_start, period_end, source in periods:
                 if period_end < start_date or period_start > end_date:

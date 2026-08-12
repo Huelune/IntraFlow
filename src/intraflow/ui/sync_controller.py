@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
 from typing import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
 
 from intraflow.config import AppSettings, RuntimeConfig
 from intraflow.sync.sync_service import SyncService
+from intraflow.timeutil import utc_now_iso
 
 
 class _JobSignals(QObject):
@@ -60,12 +60,15 @@ class SyncController(QObject):
         if self.service is not None and runtime.auto_pull_enabled:
             self.auto_timer.start(startup_delay_ms)
 
-    def set_preferences(self, enabled: bool, interval_minutes: int) -> None:
+    def set_preferences(
+        self, enabled: bool, interval_minutes: int, display_timezone: str | None,
+    ) -> None:
         if interval_minutes not in {1, 5, 10, 30, 60}:
             raise ValueError("자동 Pull 주기는 1, 5, 10, 30, 60분 중 하나여야 합니다.")
         self.runtime = replace(
             self.runtime, auto_pull_enabled=enabled,
             auto_pull_interval_minutes=interval_minutes,
+            display_timezone=display_timezone,
         )
         self.settings.save_runtime_config(self.runtime)
         self.auto_timer.stop()
@@ -117,7 +120,7 @@ class SyncController(QObject):
     def _finish_success(self, name: str, automatic: bool, result: object) -> None:
         self.busy, self.current_operation = False, None
         self._active_signals = None
-        self.last_success_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        self.last_success_at = utc_now_iso()
         self.last_error = None
         self.succeeded.emit(name, automatic, result)
         self.status_changed.emit()

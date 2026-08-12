@@ -26,7 +26,7 @@ def test_runtime_config_can_be_saved_and_loaded(tmp_path, monkeypatch) -> None:
     settings = AppSettings()
     settings.save_runtime_config(RuntimeConfig(
         "user", "device", "Z:/IntraFlow", auto_pull_enabled=True,
-        auto_pull_interval_minutes=30,
+        auto_pull_interval_minutes=30, display_timezone="Asia/Seoul",
     ))
 
     loaded = settings.runtime_config()
@@ -35,6 +35,7 @@ def test_runtime_config_can_be_saved_and_loaded(tmp_path, monkeypatch) -> None:
     assert loaded.nas_root_path == "Z:/IntraFlow"
     assert loaded.auto_pull_enabled is True
     assert loaded.auto_pull_interval_minutes == 30
+    assert loaded.display_timezone == "Asia/Seoul"
     assert not list(tmp_path.glob("*.tmp"))
 
 

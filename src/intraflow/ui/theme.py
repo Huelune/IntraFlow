@@ -125,6 +125,22 @@ QToolButton {{ min-width: 28px; min-height: 28px; max-width: 28px; max-height: 2
     border-radius: 5px; border: 1px solid {t.input_border}; background: {t.surface}; color: {t.text}; }}
 QToolButton[wide="true"] {{ max-width: 16777215px; padding: 0 8px; }}
 QToolButton:pressed, QToolButton:checked {{ border-color: {t.accent}; background: {t.selection}; }}
+QToolButton[calendarNav="true"] {{ min-width: 30px; min-height: 30px; max-width: 30px; max-height: 30px;
+    border-radius: 6px; font-size: 16pt; font-weight: 700; }}
+QLabel[calendarMonth="true"] {{ font-size: 12pt; font-weight: 700; color: {t.text}; }}
+QLabel[calendarWeekday="true"] {{ min-height: 24px; color: {t.muted}; font-weight: 700; }}
+QFrame[calendarDay="true"] {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 5px; }}
+QFrame[calendarDay="true"][selected="true"] {{ border: 2px solid {t.accent}; background: {t.selection}; }}
+QFrame[calendarDay="true"][outsideMonth="true"] {{ background: {t.background}; }}
+QFrame[calendarDay="true"][outsideMonth="true"] QLabel[calendarDate="true"] {{ color: {t.disabled_text}; }}
+QLabel[calendarDate="true"] {{ font-weight: 700; color: {t.text}; border: 0; background: transparent; }}
+QToolButton[calendarEntry="true"] {{ min-height: 20px; max-height: 20px; max-width: 16777215px;
+    padding: 0 4px; border: 1px solid transparent; border-radius: 4px; text-align: left;
+    background: {t.selection}; color: {t.text}; font-size: 9pt; }}
+QToolButton[calendarEntry="true"][calendarSource="planned"] {{ background: {t.elevated}; color: {t.muted}; }}
+QToolButton[calendarEntry="true"][deadline="true"] {{ border-color: {t.warning}; color: {t.warning}; font-weight: 700; }}
+QToolButton[calendarEntry="true"][calendarMore="true"] {{ background: transparent; color: {t.accent}; font-weight: 700; }}
+QToolButton[calendarEntry="true"]:hover {{ border-color: {t.accent}; background: {t.selection}; }}
 QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QDateEdit, QDoubleSpinBox, QSpinBox {{
     min-height: 30px; border: 1px solid {t.input_border}; border-radius: 5px;
     background: {t.surface}; color: {t.text}; padding: 1px 6px; selection-background-color: {t.accent}; }}

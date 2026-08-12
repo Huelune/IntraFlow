@@ -6,3 +6,5 @@ nas_root_path = "Z:/IntraFlow"
 # Workstation-only automatic Pull preferences. Push is always manual.
 auto_pull_enabled = false
 auto_pull_interval_minutes = 5
+# Empty means the current Windows time zone. Use an IANA ID for an explicit zone.
+display_timezone = "Asia/Seoul"

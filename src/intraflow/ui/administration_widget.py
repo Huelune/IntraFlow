@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFormLayout, QHBoxLayout, QLabel, QPushButton, QSplitter, QTabWidget,
@@ -14,15 +12,17 @@ from intraflow.services.progress_service import ProgressService
 from intraflow.services.work_service import WorkService
 from intraflow.ui.dialogs import DeviceDialog, PartDialog, ProjectDialog, UnitDialog, UserDialog
 from intraflow.ui.table_view import configure_columns
+from intraflow.ui.time_display import TimeDisplay
 
 
 class AdministrationWidget(QWidget):
     def __init__(
         self, service: AdministrationService, work: WorkService, on_changed: Callable[[], None],
-        progress: ProgressService | None = None,
+        progress: ProgressService | None = None, *, time_display: TimeDisplay | None = None,
     ) -> None:
         super().__init__()
         self.service, self.work, self.progress, self.on_changed = service, work, progress, on_changed
+        self.time_display = time_display or TimeDisplay()
         self.current_type: str | None = None
         self.current_id: str | None = None
         self.user_current_type: str | None = None
@@ -44,7 +44,7 @@ class AdministrationWidget(QWidget):
         self.tree.setAlternatingRowColors(True)
         configure_columns(self.tree, "admin-project-hierarchy", (300, 110, 90, 190, 110))
         self.tree.itemSelectionChanged.connect(self._load_hierarchy_detail)
-        self.hierarchy_detail = _ReadOnlyDetail()
+        self.hierarchy_detail = _ReadOnlyDetail(self.time_display)
         self.hierarchy_history = QTableWidget(0, 6)
         self.hierarchy_history.setHorizontalHeaderLabels(["시각", "이전량", "증감량", "현재량", "진행률", "메모"])
         self.hierarchy_history.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -85,7 +85,7 @@ class AdministrationWidget(QWidget):
         self.user_tree.setAlternatingRowColors(True)
         configure_columns(self.user_tree, "admin-users-devices", (240, 120, 100))
         self.user_tree.itemSelectionChanged.connect(self._load_user_detail)
-        self.user_detail = _ReadOnlyDetail()
+        self.user_detail = _ReadOnlyDetail(self.time_display)
         add_user, add_device, edit, refresh = (
             QPushButton("새 사용자"), QPushButton("새 기기"), QPushButton("수정"), QPushButton("새로고침"))
         add_user.setProperty("primary", True)
@@ -121,7 +121,7 @@ class AdministrationWidget(QWidget):
         self.unit_table.setAlternatingRowColors(True)
         configure_columns(self.unit_table, "admin-units", (110, 200, 90, 110))
         self.unit_table.itemSelectionChanged.connect(self._load_unit_detail)
-        self.unit_detail = _ReadOnlyDetail()
+        self.unit_detail = _ReadOnlyDetail(self.time_display)
         add, edit, refresh = QPushButton("새 단위"), QPushButton("수정"), QPushButton("새로고침")
         add.setProperty("primary", True)
         add.clicked.connect(self._new_unit)
@@ -374,10 +374,14 @@ class AdministrationWidget(QWidget):
         self.hierarchy_history.setRowCount(len(histories))
         for row, history in enumerate(histories):
             ratio = history.current_quantity / total if total else 0
-            values = [history.created_at, f"{history.previous_quantity:g}", f"{history.delta_quantity:g}",
+            values = [self.time_display.format(history.created_at, seconds=True),
+                      f"{history.previous_quantity:g}", f"{history.delta_quantity:g}",
                       f"{history.current_quantity:g}", f"{ratio:.0%}", history.note or ""]
             for column, value in enumerate(values):
-                self.hierarchy_history.setItem(row, column, QTableWidgetItem(value))
+                cell = QTableWidgetItem(value)
+                if column == 0:
+                    cell.setToolTip(self.time_display.tooltip(history.created_at))
+                self.hierarchy_history.setItem(row, column, cell)
 
     @staticmethod
     def _find_node(tree: QTreeWidget, kind: str | None, identity: str | None):
@@ -393,8 +397,9 @@ class AdministrationWidget(QWidget):
 
 
 class _ReadOnlyDetail(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, time_display: TimeDisplay | None = None) -> None:
         super().__init__()
+        self.time_display = time_display or TimeDisplay()
         self.title = QLabel("항목을 선택하세요")
         self.title.setProperty("role", "title")
         self.form = QFormLayout()
@@ -411,7 +416,7 @@ class _ReadOnlyDetail(QWidget):
     def show_values(self, title: str, values: list[tuple[str, str]]) -> None:
         self.clear()
         self.title.setText(title)
-        refreshed_at = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        refreshed_at = self.time_display.now(seconds=True)
         for label, value in [*values, ("로컬 새로고침", refreshed_at)]:
             widget = QLabel(value)
             widget.setWordWrap(True)

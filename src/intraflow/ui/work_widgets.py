@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtWidgets import (
-    QButtonGroup, QCalendarWidget, QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox,
+    QButtonGroup, QCheckBox, QComboBox, QDateEdit, QDoubleSpinBox,
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QStyle, QTableWidget, QTableWidgetItem,
     QTextEdit, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
@@ -19,6 +17,8 @@ from intraflow.services.team_view_service import (
 from intraflow.services.work_service import WorkItemView, WorkService
 from intraflow.ui.dialogs import WorkItemDialog
 from intraflow.ui.table_view import configure_columns
+from intraflow.ui.team_calendar import TeamMonthCalendar
+from intraflow.ui.time_display import TimeDisplay
 
 
 def date_edit() -> QDateEdit:
@@ -29,9 +29,10 @@ def date_edit() -> QDateEdit:
 
 
 class WorkDetailPanel(QWidget):
-    def __init__(self, *, owner_mode: bool) -> None:
+    def __init__(self, *, owner_mode: bool, time_display: TimeDisplay | None = None) -> None:
         super().__init__()
         self.owner_mode = owner_mode
+        self.time_display = time_display or TimeDisplay()
         self.current_item: WorkItemView | None = None
         self.inputs_dirty = False
         self.setProperty("card", True)
@@ -192,8 +193,11 @@ class WorkDetailPanel(QWidget):
         self.state.style().polish(self.state)
         self.quantity.setText(f"{item.completed_quantity:g} / {item.total_quantity:g}")
         self.progress.setValue(round(item.progress_ratio * 100))
-        self.updated.setText(item.updated_at)
-        self.local_refreshed.setText(datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
+        self.time_display.set_label(self.updated, item.updated_at)
+        self.local_refreshed.setText(self.time_display.now(seconds=True))
+        self.local_refreshed.setToolTip(
+            f"현재 표시 시간대: {self.time_display.effective_timezone_id}",
+        )
         self.edit_button.setVisible(self.owner_mode)
         self.delete_button.setVisible(self.owner_mode)
         self.open_my_button.setVisible(show_open_my)
@@ -212,19 +216,27 @@ class WorkDetailPanel(QWidget):
         self.history.setRowCount(len(histories))
         for row_index, history in enumerate(histories):
             ratio = history.current_quantity / item.total_quantity if item.total_quantity else 0
-            values = [history.created_at, f"{history.previous_quantity:g}", f"{history.delta_quantity:g}",
+            values = [self.time_display.format(history.created_at, seconds=True),
+                      f"{history.previous_quantity:g}", f"{history.delta_quantity:g}",
                       f"{history.current_quantity:g}", f"{ratio:.0%}", history.note or ""]
             for column, value in enumerate(values):
-                self.history.setItem(row_index, column, QTableWidgetItem(value))
+                cell = QTableWidgetItem(value)
+                if column == 0:
+                    cell.setToolTip(self.time_display.tooltip(history.created_at))
+                self.history.setItem(row_index, column, cell)
 
     def _mark_dirty(self, *_args) -> None:
         self.inputs_dirty = True
 
 
 class MyWorkWidget(QWidget):
-    def __init__(self, work: WorkService, progress: ProgressService, on_changed: Callable[[], None]) -> None:
+    def __init__(
+        self, work: WorkService, progress: ProgressService, on_changed: Callable[[], None],
+        *, time_display: TimeDisplay | None = None,
+    ) -> None:
         super().__init__()
         self.work, self.progress, self.on_changed = work, progress, on_changed
+        self.time_display = time_display or TimeDisplay()
         self.current_item_id: str | None = None
         self.current_assignment_id: str | None = None
         self.include_inactive = QCheckBox("비활성 포함")
@@ -249,7 +261,7 @@ class MyWorkWidget(QWidget):
             self.table, "my-work-list", (180, 150, 140, 85, 80, 80, 110, 190, 240),
         )
         self.table.itemSelectionChanged.connect(self._load_selection)
-        self.detail = WorkDetailPanel(owner_mode=True)
+        self.detail = WorkDetailPanel(owner_mode=True, time_display=self.time_display)
         self.detail.refresh_button.clicked.connect(self.manual_refresh)
         self.detail.edit_button.clicked.connect(self.edit_item)
         self.detail.delete_button.clicked.connect(self.delete_item)
@@ -434,8 +446,9 @@ class MyWorkWidget(QWidget):
 
 
 class AggregateDetailPanel(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, time_display: TimeDisplay | None = None) -> None:
         super().__init__()
+        self.time_display = time_display or TimeDisplay()
         self.setProperty("card", True)
         self.title = QLabel("프로젝트 또는 파트를 선택하세요")
         self.title.setProperty("role", "title")
@@ -466,7 +479,8 @@ class AggregateDetailPanel(QWidget):
         self.values.setText(
             f"상태  {node.status}    전체 {node.total_count}    완료 {node.completed_count}    "
             f"진행 중 {node.in_progress_count}    미시작 {node.not_started_count}    "
-            f"경고 {node.warning_count}\n마지막 갱신  {node.last_updated or '-'}")
+            f"경고 {node.warning_count}\n마지막 갱신  {self.time_display.format(node.last_updated)}")
+        self.values.setToolTip(self.time_display.tooltip(node.last_updated))
         self.children.setRowCount(len(node.children))
         for row, child in enumerate(node.children):
             values = [child.label, "업무 없음" if child.progress_ratio is None else f"{child.progress_ratio:.0%}",
@@ -478,12 +492,12 @@ class AggregateDetailPanel(QWidget):
 class TeamWorkWidget(QWidget):
     def __init__(
         self, work: WorkService, progress: ProgressService, team_view: TeamViewService,
-        open_my_work: Callable[[str], None],
+        open_my_work: Callable[[str], None], *, time_display: TimeDisplay | None = None,
     ) -> None:
         super().__init__()
         self.work, self.progress, self.team_view, self.open_my_work = work, progress, team_view, open_my_work
+        self.time_display = time_display or TimeDisplay()
         self.current_item_id: str | None = None
-        self._calendar_formatted_dates: set[QDate] = set()
         self.filter_user, self.filter_project, self.filter_part, self.filter_progress = (
             QComboBox(), QComboBox(), QComboBox(), QComboBox())
         self.include_inactive = QCheckBox("비활성 포함")
@@ -509,10 +523,10 @@ class TeamWorkWidget(QWidget):
         self.left_stack.addWidget(self._build_list_page())
         self.left_stack.addWidget(self._build_calendar_page())
         self.left_stack.addWidget(self._build_overview_page())
-        self.detail = WorkDetailPanel(owner_mode=False)
+        self.detail = WorkDetailPanel(owner_mode=False, time_display=self.time_display)
         self.detail.refresh_button.clicked.connect(self.refresh)
         self.detail.open_my_button.clicked.connect(self._open_selected)
-        self.aggregate_detail = AggregateDetailPanel()
+        self.aggregate_detail = AggregateDetailPanel(self.time_display)
         self.detail_stack = QStackedWidget()
         self.detail_stack.addWidget(_detail_scroll(self.detail))
         self.detail_stack.addWidget(_detail_scroll(self.aggregate_detail))
@@ -555,12 +569,10 @@ class TeamWorkWidget(QWidget):
         return page
 
     def _build_calendar_page(self) -> QWidget:
-        self.calendar = QCalendarWidget()
-        self.calendar.setGridVisible(True)
+        self.calendar = TeamMonthCalendar()
         self.calendar.selectionChanged.connect(self._refresh_agenda)
         self.calendar.currentPageChanged.connect(lambda *_args: self._refresh_calendar())
-        self.show_planned = QCheckBox("계획 일정 표시")
-        self.show_planned.toggled.connect(lambda *_args: self._refresh_calendar())
+        self.calendar.workActivated.connect(self._select_calendar_work)
         self.agenda = QTableWidget(0, 6)
         self.agenda.setHorizontalHeaderLabels(["구분", "소유자", "업무", "기간", "상태", "진행률"])
         self.agenda.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -570,10 +582,6 @@ class TeamWorkWidget(QWidget):
         page = QWidget()
         page.setProperty("card", True)
         layout = QVBoxLayout(page)
-        actions = QHBoxLayout()
-        actions.addWidget(self.show_planned)
-        actions.addStretch()
-        layout.addLayout(actions)
         layout.addWidget(self.calendar, stretch=2)
         layout.addWidget(_section("선택 날짜의 팀 업무"))
         layout.addWidget(self.agenda, stretch=1)
@@ -650,32 +658,15 @@ class TeamWorkWidget(QWidget):
         last = first.addMonths(1).addDays(-1)
         self.calendar_entries = self.team_view.list_calendar_entries(
             first.toString("yyyy-MM-dd"), last.toString("yyyy-MM-dd"),
-            include_planned=self.show_planned.isChecked(), filters=self._service_filters())
+            filters=self._service_filters())
         self.calendar_entries = [x for x in self.calendar_entries if self._matches_progress(x.progress_state)]
-        empty = QTextCharFormat()
-        for value in self._calendar_formatted_dates:
-            self.calendar.setDateTextFormat(value, empty)
-        self._calendar_formatted_dates.clear()
-        by_date: dict[QDate, set[str]] = {}
-        for entry in self.calendar_entries:
-            day = QDate.fromString(entry.start_date, "yyyy-MM-dd")
-            end = QDate.fromString(entry.end_date, "yyyy-MM-dd")
-            while day.isValid() and day <= end:
-                by_date.setdefault(day, set()).add(entry.source)
-                day = day.addDays(1)
-        for day, sources in by_date.items():
-            fmt = QTextCharFormat()
-            color = (self.calendar.palette().color(self.calendar.foregroundRole())
-                     if sources == {"PLANNED"} else QColor("#00A98E"))
-            if sources == {"PLANNED"}:
-                fmt.setForeground(color)
-                fmt.setBackground(self.calendar.palette().color(self.calendar.backgroundRole()).lighter(115))
-            else:
-                fmt.setBackground(QColor("#00A98E"))
-                fmt.setForeground(QColor("#07110F"))
-            self.calendar.setDateTextFormat(day, fmt)
-            self._calendar_formatted_dates.add(day)
+        self.calendar.set_entries(self.calendar_entries)
         self._refresh_agenda()
+
+    def _select_calendar_work(self, work_item_id: str) -> None:
+        self.current_item_id = work_item_id
+        self._refresh_agenda()
+        self._load_detail()
 
     def _refresh_agenda(self) -> None:
         day = self.calendar.selectedDate().toString("yyyy-MM-dd")
@@ -733,10 +724,12 @@ class TeamWorkWidget(QWidget):
     ) -> QTreeWidgetItem:
         values = [node.label, "업무 없음" if node.progress_ratio is None else f"{node.progress_ratio:.0%}",
                   str(node.total_count), str(node.completed_count), str(node.in_progress_count),
-                  str(node.not_started_count), str(node.warning_count), node.status, node.last_updated or "-"]
+                  str(node.not_started_count), str(node.warning_count), node.status,
+                  self.time_display.format(node.last_updated)]
         item = QTreeWidgetItem(values)
         item.setData(0, Qt.ItemDataRole.UserRole, node)
         item.setData(0, Qt.ItemDataRole.UserRole + 1, path)
+        item.setToolTip(8, self.time_display.tooltip(node.last_updated))
         if parent is None:
             self.overview_tree.addTopLevelItem(item)
         else:
