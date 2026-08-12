@@ -34,12 +34,15 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BuildVenv = Join-Path $ProjectRoot ".build-venv"
 $BuildRoot = Join-Path $ProjectRoot "build\windows"
 $PytestTemp = Join-Path $ProjectRoot "build\pytest-temp"
+$NuitkaCache = Join-Path $ProjectRoot "build\nuitka-cache"
 $ReleaseRoot = Join-Path $ProjectRoot "release"
 $EntryPoint = Join-Path $ProjectRoot "src\intraflow\main.py"
 $Python = Join-Path $BuildVenv "Scripts\python.exe"
 $ArtifactBaseName = "IntraFlow-$Version-windows-x64"
 
 Set-Location -LiteralPath $ProjectRoot
+$env:NUITKA_CACHE_DIR = $NuitkaCache
+New-Item -ItemType Directory -Path $NuitkaCache -Force | Out-Null
 
 function Assert-ChildPath {
     param([Parameter(Mandatory)][string]$Path)
@@ -145,7 +148,7 @@ $NuitkaArguments = @(
     "--nofollow-import-to=PySide6.QtQuick",
     "--nofollow-import-to=PySide6.QtQml",
     "--nofollow-import-to=PySide6.Qt3DCore",
-    "--noinclude-qt-translations=True"
+    "--noinclude-qt-translations"
 )
 
 if ($Mode -eq "OneFile") {
