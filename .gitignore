@@ -11,10 +11,12 @@ htmlcov/
 
 # Virtual environments and build artifacts
 .venv/
+.build-venv/
 venv/
 env/
 build/
 dist/
+release/
 *.egg-info/
 
 # Local SQLite databases and journal files

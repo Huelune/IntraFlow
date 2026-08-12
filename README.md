@@ -69,4 +69,34 @@ Windows의 라이트·다크 모드를 자동으로 감지해 앱 전체 Palette
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
+## Windows EXE 빌드
+
+기본 배포본은 Nuitka와 `PySide6-Essentials`만 사용하는 standalone ZIP입니다. 별도의 `.build-venv`에서 테스트와 빌드를 수행하므로 개발용 가상환경의 전체 PySide6 Addons가 배포본에 포함되지 않습니다.
+
+```powershell
+.\scripts\build-windows.ps1 -Clean
+```
+
+완성된 폴더와 ZIP은 `release/`에 생성됩니다. 두 번째 빌드부터 패키지 설치를 생략하려면 다음처럼 실행합니다.
+
+```powershell
+.\scripts\build-windows.ps1 -Clean -SkipInstall
+```
+
+단일 EXE가 필요한 경우에는 먼저 standalone 배포본을 검증한 뒤 다음 명령을 사용합니다.
+
+```powershell
+.\scripts\build-windows.ps1 -Mode OneFile -Clean -SkipInstall
+```
+
+사용 가능한 옵션:
+
+- `-Clean`: 기존 `build/windows`와 `release` 산출물을 제거하고 다시 빌드
+- `-Version 0.1.0`: 산출물 파일명에 사용할 버전 지정
+- `-SkipTests`: 자동 테스트 생략
+- `-SkipInstall`: 기존 `.build-venv`의 패키지를 그대로 사용
+- `-AllowCompilerDownload`: Visual Studio C 컴파일러가 없을 때 Nuitka MinGW64 사용
+
+스크립트는 `alembic.ini`와 migration Python 파일을 압축 리소스로 포함합니다. 실행 시 이 리소스는 `%LOCALAPPDATA%\IntraFlow\migration-runtime`에 안전하게 풀리며, 실제 DB와 설정 역시 배포 폴더 밖의 로컬 앱 데이터 경로에 유지됩니다.
+
 상세한 초기 설정과 데이터 흐름은 [MVP 설정 문서](docs/mvp-setup.md)를 참고하세요.

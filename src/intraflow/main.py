@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from intraflow.bootstrap import build_database
 from intraflow.config import settings
 from intraflow.database_upgrade import DatabaseUpgradeError, upgrade_database
+from intraflow.deployment import migration_root
 from intraflow.models import Base, Device, User
 from intraflow.services.administration_service import AdministrationService
 from intraflow.services.progress_service import ProgressService
@@ -24,9 +24,8 @@ def main() -> int:
     app = QApplication(sys.argv)
     apply_theme(app)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    project_root = Path(__file__).resolve().parents[2]
     try:
-        upgrade_database(settings.db_path, project_root)
+        upgrade_database(settings.db_path, migration_root(settings.data_dir))
     except DatabaseUpgradeError as exc:
         QMessageBox.critical(None, "데이터베이스 업그레이드 실패", str(exc))
         return 1
