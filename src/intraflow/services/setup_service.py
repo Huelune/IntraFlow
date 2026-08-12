@@ -26,6 +26,12 @@ class SetupService:
         self.session_factory = session_factory
 
     def provision(self, user_code: str, display_name: str, device_name: str | None = None) -> ProvisionedIdentity:
+        """Backward-compatible alias for starting a new local team."""
+        return self.start_new_team(user_code, display_name, device_name)
+
+    def start_new_team(
+        self, user_code: str, display_name: str, device_name: str | None = None,
+    ) -> ProvisionedIdentity:
         user_code = user_code.strip()
         display_name = display_name.strip()
         resolved_device_name = (device_name or node() or "This PC").strip()
@@ -56,9 +62,9 @@ class SetupService:
                     created_at=now, retry_count=0,
                 ))
             elif not user.is_active:
-                raise ValidationError("the configured user is inactive")
+                raise ValidationError("비활성 사용자 코드입니다.")
             else:
-                user_id = user.id
+                raise ValidationError("이미 존재하는 팀 사용자입니다. 기존 팀 합류를 사용하세요.")
             for previous in session.scalars(select(Device).where(Device.user_id == user_id, Device.is_current == 1)):
                 previous.is_current = 0
             session.add(Device(
@@ -69,6 +75,38 @@ class SetupService:
                 created_at=now,
             ))
         return ProvisionedIdentity(user_id=user_id, device_id=device_id, device_name=resolved_device_name)
+
+    def register_device_for_existing_user(
+        self, user_id: str, device_name: str | None = None, *, session: Session | None = None,
+    ) -> ProvisionedIdentity:
+        resolved_device_name = (device_name or node() or "This PC").strip()
+        if not resolved_device_name:
+            raise ValidationError("PC 이름은 필수입니다.")
+
+        def register(active_session: Session) -> ProvisionedIdentity:
+            user = active_session.get(User, user_id)
+            if user is None:
+                raise ValidationError("NAS에서 선택한 사용자를 찾을 수 없습니다.")
+            if not user.is_active:
+                raise ValidationError("비활성 사용자는 이 PC에 연결할 수 없습니다.")
+            existing = active_session.scalar(select(Device).where(
+                Device.user_id == user_id,
+                Device.device_name == resolved_device_name,
+                Device.is_current == 1,
+            ))
+            if existing is not None:
+                return ProvisionedIdentity(user_id, existing.id, resolved_device_name)
+            device_id = str(uuid4())
+            active_session.add(Device(
+                id=device_id, user_id=user_id, device_name=resolved_device_name,
+                is_current=1, created_at=utc_now_iso(),
+            ))
+            return ProvisionedIdentity(user_id, device_id, resolved_device_name)
+
+        if session is not None:
+            return register(session)
+        with self.session_factory.begin() as active_session:
+            return register(active_session)
 
     def ensure_bootstrap_admin(self, user_id: str) -> None:
         """Promote only the sole user in a legacy empty installation."""

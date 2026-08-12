@@ -19,7 +19,7 @@ from intraflow.models import (
     User,
     WorkItem,
 )
-from intraflow.services.errors import SyncError
+from intraflow.services.errors import SyncError, UserPublicConflictError
 from intraflow.sync.nas_client import NasClient
 from intraflow.sync.schemas import (
     ProjectSnapshot,
@@ -99,6 +99,13 @@ class PullService:
         if not isinstance(snapshot, UserPublicSnapshot) or snapshot.user_id != user_id:
             raise SyncError("user public path does not match user snapshot")
         with self.session_factory.begin() as session:
+            dirty = session.query(SyncOutbox).filter_by(
+                target_type="USER_PUBLIC", target_id=user_id,
+            ).one_or_none()
+            state = session.get(SyncState, ("USER_PUBLIC", user_id))
+            known_revision = state.remote_revision if state is not None else 0
+            if dirty is not None and snapshot.revision != known_revision:
+                raise UserPublicConflictError(user_id, known_revision, snapshot.revision)
             if not self._newer(session, "USER_PUBLIC", user_id, snapshot.revision):
                 return False
             if session.get(User, user_id) is None:

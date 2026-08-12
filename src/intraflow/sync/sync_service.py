@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from intraflow.config import settings
 from intraflow.models import SyncOutbox, SyncState
+from intraflow.sync.conflict_service import ConflictChoice, UserPublicConflict, UserPublicConflictService
 from intraflow.sync.nas_client import NasClient
 from intraflow.sync.pull_service import PullService
 from intraflow.sync.push_service import PushService
@@ -25,6 +27,10 @@ class SyncService:
         self.current_user_id = current_user_id
         self.push_service = PushService(session_factory, nas, current_user_id=current_user_id)
         self.pull_service = PullService(session_factory, nas)
+        self.conflict_service = UserPublicConflictService(
+            session_factory, nas, user_id=current_user_id,
+            conflict_root=settings.data_dir / "conflicts",
+        )
 
     def status(self) -> SyncStatus:
         with self.session_factory() as session:
@@ -50,11 +56,20 @@ class SyncService:
         for project_id in self.nas.list_project_ids():
             completed += int(self.pull_service.pull_project(project_id))
         for user_id in self.nas.list_user_ids():
-            if user_id != self.current_user_id:
-                completed += int(self.pull_service.pull_user_public(user_id))
+            completed += int(self.pull_service.pull_user_public(user_id))
         return completed
 
     def synchronize(self) -> tuple[int, int]:
         pulled = self.pull_all()
         pushed = self.push_all()
         return pulled, pushed
+
+    def inspect_user_public_conflict(self) -> UserPublicConflict:
+        return self.conflict_service.inspect()
+
+    def resolve_user_public_conflict(
+        self, choices: dict[str, ConflictChoice], *, expected_remote_revision: int | None = None,
+    ):
+        return self.conflict_service.resolve(
+            choices, expected_remote_revision=expected_remote_revision,
+        )

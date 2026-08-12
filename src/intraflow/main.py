@@ -32,6 +32,7 @@ def main() -> int:
     engine, session_factory = build_database()
     Base.metadata.create_all(engine)
     runtime = settings.runtime_config()
+    joined_existing_team = False
     with session_factory() as session:
         setup_required = (
             runtime.current_user_id is None
@@ -44,8 +45,9 @@ def main() -> int:
         if dialog.exec() != SetupDialog.DialogCode.Accepted or dialog.runtime is None:
             return 1
         runtime = dialog.runtime
-    setup_service = SetupService(session_factory)
-    setup_service.ensure_bootstrap_admin(runtime.current_user_id)
+        joined_existing_team = dialog.joined_existing_team
+    if not joined_existing_team:
+        SetupService(session_factory).ensure_bootstrap_admin(runtime.current_user_id)
     progress = ProgressService(
         session_factory,
         current_user_id=runtime.current_user_id,

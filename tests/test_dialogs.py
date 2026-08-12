@@ -7,6 +7,9 @@ from PySide6.QtWidgets import QApplication
 from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.ui.dialogs import PartDialog, ProjectDialog, WorkItemDialog
+from intraflow.config import AppSettings
+from intraflow.services.setup_service import SetupService
+from intraflow.ui.setup_dialog import SetupDialog
 from workflow import build_workflow
 
 
@@ -30,3 +33,20 @@ def test_definition_dialogs_make_create_and_edit_modes_explicit(
     assert (edit_part.windowTitle(), edit_part.save_button.text()) == ("파트 수정", "변경 저장")
     for dialog in (new_work, edit_work, new_project, edit_part):
         dialog.close()
+
+
+def test_setup_dialog_separates_new_team_and_existing_team_join(
+    session_factory: sessionmaker[Session], tmp_path, monkeypatch,
+) -> None:
+    QApplication.instance() or QApplication([])
+    monkeypatch.setenv("INTRAFLOW_CONFIG_PATH", str(tmp_path / "intraflow.local.toml"))
+    dialog = SetupDialog(AppSettings(), SetupService(session_factory))
+
+    assert dialog.start_mode.text() == "새 팀 시작"
+    assert dialog.join_mode.text() == "기존 팀 합류"
+    assert dialog.ok_button.text() == "새 팀 시작"
+    dialog.join_mode.setChecked(True)
+    assert dialog.ok_button.text() == "이 PC 연결"
+    assert dialog.check_nas.isHidden() is False
+    assert "NAS" in dialog.preview.text()
+    dialog.close()

@@ -5,7 +5,9 @@ from hashlib import sha256
 from sqlalchemy.orm import Session, sessionmaker
 
 from intraflow.models import ProjectEditor, SyncOutbox, SyncState, User
-from intraflow.services.errors import PermissionDeniedError, RevisionConflictError, SyncError
+from intraflow.services.errors import (
+    PermissionDeniedError, RevisionConflictError, SyncError, UserPublicConflictError,
+)
 from intraflow.sync.lock_manager import LockManager
 from intraflow.sync.nas_client import NasClient
 from intraflow.sync.snapshot_builder import SnapshotBuilder
@@ -32,11 +34,16 @@ class PushService:
             raise PermissionDeniedError("자신의 공개 snapshot만 업로드할 수 있습니다.")
         with self.session_factory() as session:
             snapshot = SnapshotBuilder(session).user_public(user_id)
-        remote = self.nas.read_json("users", user_id, "public.json")
-        remote_revision = int(remote.get("revision", 0)) if remote else 0
-        outbound = snapshot.model_copy(update={"revision": max(snapshot.revision, remote_revision + 1)})
-        payload = outbound.model_dump(mode="json")
-        self.nas.write_json_atomic(payload, "users", user_id, "public.json")
+            state = session.get(SyncState, ("USER_PUBLIC", user_id))
+            known_remote_revision = state.remote_revision if state is not None else 0
+        with self.locks.acquire(f"user-public-{user_id}"):
+            remote = self.nas.read_json("users", user_id, "public.json")
+            remote_revision = int(remote.get("revision", 0)) if remote else 0
+            if remote_revision != known_remote_revision:
+                raise UserPublicConflictError(user_id, known_remote_revision, remote_revision)
+            outbound = snapshot.model_copy(update={"revision": max(snapshot.revision, remote_revision + 1)})
+            payload = outbound.model_dump(mode="json")
+            self.nas.write_json_atomic(payload, "users", user_id, "public.json")
         self._record_success("USER_PUBLIC", user_id, outbound.revision, payload, clear_outbox=True)
         return outbound.revision
 
